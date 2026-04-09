@@ -4,14 +4,20 @@ from typing import Optional
 
 class ArrangeRequest(BaseModel):
     arrangement_id: str
-    instruments: list[str]  # e.g. ["violin", "piano", "drums"]
+    instruments: list[str]  # e.g. ["바이올린_2", "피아노"]
     mode: str               # "quick" | "thorough"
+
+
+class ScoreResult(BaseModel):
+    instrument: str
+    pdf_url: str | None = None
+    png_url: str | None = None
 
 
 class ArrangeStatus(BaseModel):
     id: str
     status: str             # "pending" | "processing" | "done" | "error"
-    scores: Optional[list[dict]] = None
+    scores: list[ScoreResult] | None = None
 
 
 class HealthResponse(BaseModel):
