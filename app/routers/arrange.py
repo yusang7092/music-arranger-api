@@ -19,14 +19,15 @@ async def _process_arrangement(
             {"status": "processing"}
         ).eq("id", arrangement_id).execute()
 
-        # 2. 음표 추출 / 스템 분리
+        # 2. 음표 추출 / 스템 분리 (+ 곡 검색은 AI 함수 내부에서 병렬 실행)
+        original_filename = request.original_filename or ""
         if request.mode == "quick":
             notes_data = await audio_processor.extract_notes_basic_pitch(file_path)
-            arrangement = await ai_arranger.arrange_quick(notes_data, request.instruments)
+            arrangement = await ai_arranger.arrange_quick(notes_data, request.instruments, original_filename)
         else:  # thorough
             stems_data = await audio_processor.separate_stems_demucs(file_path)
             stems_notes = await audio_processor.extract_notes_from_stems(stems_data)
-            arrangement = await ai_arranger.arrange_thorough(stems_notes, request.instruments)
+            arrangement = await ai_arranger.arrange_thorough(stems_notes, request.instruments, original_filename)
 
         # 3. 악기별 악보 생성 + Storage 업로드
         score_records = []

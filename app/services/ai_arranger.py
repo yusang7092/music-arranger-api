@@ -54,7 +54,7 @@ INSTRUMENT_RANGES = {
 }
 
 
-def _build_quick_prompt(notes_data: dict, instruments: list[str]) -> str:
+def _build_quick_prompt(notes_data: dict, instruments: list[str], references: str = "") -> str:
     # 음표 데이터를 압축 (너무 길면 앞 100개만)
     notes_sample = notes_data.get("notes", [])[:100]
 
@@ -67,8 +67,10 @@ def _build_quick_prompt(notes_data: dict, instruments: list[str]) -> str:
         name_en = INSTRUMENT_MAP.get(name_kr, name_kr)
         instrument_list.append({"korean": name_kr, "english": name_en, "count": count})
 
-    return f"""You are a professional music arranger. Given extracted note data from an audio file, create a musical arrangement for the specified instruments.
+    references_section = f"\n## Song Research & References\n{references}\n" if references else ""
 
+    return f"""You are a professional music arranger. Given extracted note data from an audio file, create a musical arrangement for the specified instruments.
+{references_section}
 ## Extracted Notes (sample)
 ```json
 {json.dumps(notes_sample, indent=2)}
@@ -82,9 +84,10 @@ Total duration: {notes_data.get('total_duration', 0):.1f} seconds
 
 ## Task
 Create a musical arrangement assigning notes to each instrument. For each instrument:
-1. Assign appropriate notes based on the instrument's range and character
-2. Maintain musical coherence and harmony
-3. Consider the instrument's typical role (melody, harmony, bass, rhythm)
+1. Use the Song Research section above to inform key, tempo, and style choices
+2. Assign appropriate notes based on the instrument's range and character
+3. Maintain musical coherence and harmony
+4. Consider the instrument's typical role (melody, harmony, bass, rhythm)
 
 ## Output Format (STRICT JSON)
 Return ONLY valid JSON, no other text:
@@ -104,7 +107,7 @@ Return ONLY valid JSON, no other text:
 Important: pitch is MIDI number (0-127). Return at least 20 notes per instrument."""
 
 
-def _build_thorough_prompt(stems_notes: dict, instruments: list[str]) -> str:
+def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references: str = "") -> str:
     instrument_list = []
     for inst in instruments:
         parts = inst.split("_")
@@ -126,8 +129,10 @@ def _build_thorough_prompt(stems_notes: dict, instruments: list[str]) -> str:
             "sample": notes[:30]
         }
 
-    return f"""You are a professional orchestral arranger with expertise in voice leading and orchestration.
+    references_section = f"\n## Song Research & References\n{references}\n" if references else ""
 
+    return f"""You are a professional orchestral arranger with expertise in voice leading and orchestration.
+{references_section}
 ## Stem Analysis
 ```json
 {json.dumps(stems_summary, indent=2)}
@@ -197,11 +202,61 @@ async def _call_openrouter(prompt: str, model: str) -> dict:
     return json.loads(content)
 
 
-async def arrange_quick(notes_data: dict, instruments: list[str]) -> dict:
-    prompt = _build_quick_prompt(notes_data, instruments)
+async def search_song_references(filename: str) -> str:
+    """
+    곡명을 기반으로 웹에서 악보/편곡 레퍼런스를 검색.
+    Perplexity Sonar (웹 검색 가능)를 사용.
+    검색 실패 시 빈 문자열 반환 (편곡은 계속 진행).
+    """
+    # 파일명에서 곡명 추출 (확장자 제거, 특수문자 정리)
+    import re
+    song_name = re.sub(r'\.[^.]+$', '', filename)  # 확장자 제거
+    song_name = re.sub(r'[_\-]+', ' ', song_name).strip()
+
+    if not song_name:
+        return ""
+
+    search_prompt = f"""Search for sheet music, musical analysis, and arrangement references for the song: "{song_name}"
+
+Please find:
+1. The musical key and time signature of this song
+2. Chord progressions and harmonic structure
+3. Any notable musical characteristics (genre, tempo, mood)
+4. Common arrangements or covers of this song
+5. Any sheet music descriptions or analysis available
+
+Provide a concise summary that would help a music arranger create a high-quality arrangement."""
+
+    try:
+        headers = {
+            "Authorization": f"Bearer {settings.openrouter_api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://music-arranger.vercel.app",
+            "X-Title": "Music Arranger"
+        }
+        payload = {
+            "model": "perplexity/sonar",
+            "messages": [{"role": "user", "content": search_prompt}],
+            "max_tokens": 1024,
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(OPENROUTER_URL, json=payload, headers=headers)
+            if response.status_code == 200:
+                result = response.json()
+                return result["choices"][0]["message"]["content"]
+    except Exception:
+        pass
+
+    return ""
+
+
+async def arrange_quick(notes_data: dict, instruments: list[str], filename: str = "") -> dict:
+    references = await search_song_references(filename) if filename else ""
+    prompt = _build_quick_prompt(notes_data, instruments, references)
     return await _call_openrouter(prompt, "google/gemini-2.5-flash")
 
 
-async def arrange_thorough(stems_notes: dict, instruments: list[str]) -> dict:
-    prompt = _build_thorough_prompt(stems_notes, instruments)
+async def arrange_thorough(stems_notes: dict, instruments: list[str], filename: str = "") -> dict:
+    references = await search_song_references(filename) if filename else ""
+    prompt = _build_thorough_prompt(stems_notes, instruments, references)
     return await _call_openrouter(prompt, "anthropic/claude-sonnet-4-5")
