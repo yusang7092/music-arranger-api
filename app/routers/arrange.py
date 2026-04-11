@@ -172,6 +172,23 @@ async def start_arrangement(
     finally:
         tmp_file.close()
 
+    # 오디오 파일을 Supabase Storage에 백업 (service role key로 RLS 우회)
+    try:
+        import re as _re
+        safe_name = _re.sub(r'[^\w.\-]', '_', original_filename or file.filename or "audio.mp3")
+        safe_name = _re.sub(r'_+', '_', safe_name)
+        storage_key = f"audio/{arrangement_id}/{safe_name}"
+        with open(tmp_path, "rb") as f:
+            audio_bytes = f.read()
+        supabase.storage.from_("audio-files").upload(
+            storage_key, audio_bytes,
+            {"content-type": file.content_type or "audio/mpeg", "x-upsert": "true"}
+        )
+        audio_url = supabase.storage.from_("audio-files").get_public_url(storage_key)
+        supabase.table("arrangements").update({"audio_url": audio_url}).eq("id", arrangement_id).execute()
+    except Exception as e:
+        pass  # 저장 실패해도 편곡은 계속
+
     request = ArrangeRequest(
         arrangement_id=arrangement_id,
         instruments=instruments,
