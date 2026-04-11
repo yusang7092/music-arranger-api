@@ -1,8 +1,12 @@
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Depends
-from app.models.schemas import ArrangeRequest, ArrangeStatus, ScoreResult
+import json
+from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException
+from app.models.schemas import ArrangeRequest, ArrangeStatus, ScoreResult, ReviseRequest, RevisionStatus
 from app.core.supabase import supabase
 
 router = APIRouter(prefix="/arrange", tags=["arrange"])
+
+# 수정 작업 상태 추적 (in-memory, 단일 인스턴스 서버)
+_revision_tasks: dict[str, dict] = {}   # key: f"{arrangement_id}:{instrument_kr}"
 
 
 async def _process_arrangement(
@@ -29,7 +33,20 @@ async def _process_arrangement(
             stems_notes = await audio_processor.extract_notes_from_stems(stems_data)
             arrangement = await ai_arranger.arrange_thorough(stems_notes, request.instruments, original_filename)
 
-        # 3. 악기별 악보 생성 + Storage 업로드
+        # 3. AI 편곡 결과 JSON을 Storage에 저장 (수정 요청 시 재활용)
+        try:
+            from app.core.supabase import supabase as sb
+            arrangement_json_bytes = json.dumps(arrangement).encode()
+            arrangement_json_key = f"scores/{arrangement_id}/arrangement.json"
+            sb.storage.from_("scores").upload(
+                arrangement_json_key,
+                arrangement_json_bytes,
+                {"content-type": "application/json", "x-upsert": "true"},
+            )
+        except Exception:
+            pass  # 저장 실패해도 악보 생성은 계속
+
+        # 4. 악기별 악보 생성 + Storage 업로드
         score_records = []
         instruments_in_arrangement = arrangement.get("instruments", {})
 
@@ -190,4 +207,113 @@ async def get_arrangement_status(arrangement_id: str):
         id=data["id"],
         status=data["status"],
         scores=scores,
+    )
+
+
+# ─── 악기별 수정 ───────────────────────────────────────────────
+
+async def _revise_instrument(arrangement_id: str, instrument_kr: str, feedback: str) -> None:
+    """특정 악기 악보를 피드백 기반으로 수정하는 백그라운드 태스크."""
+    from app.services import ai_arranger, score_generator
+    from app.core.supabase import supabase as sb
+    import time
+
+    task_key = f"{arrangement_id}:{instrument_kr}"
+
+    try:
+        # 1. 저장된 arrangement.json 로드
+        json_key = f"scores/{arrangement_id}/arrangement.json"
+        json_bytes = sb.storage.from_("scores").download(json_key)
+        arrangement = json.loads(json_bytes)
+
+        # 2. 악기 이름 매핑
+        from app.services.ai_arranger import INSTRUMENT_MAP
+        inst_en = INSTRUMENT_MAP.get(instrument_kr, instrument_kr)
+
+        # 3. 현재 음표 추출
+        current_notes = (
+            arrangement.get("instruments", {})
+            .get(inst_en, {})
+            .get("notes", [])
+        )
+        tempo = arrangement.get("tempo", 120)
+        time_sig = arrangement.get("time_signature", "4/4")
+
+        # 4. AI 수정
+        revised_notes = await ai_arranger.revise_instrument(
+            current_notes, instrument_kr, inst_en, feedback, tempo, time_sig
+        )
+
+        # 5. 악보 재생성
+        revised_arrangement = {"tempo": tempo, "time_signature": time_sig, "notes": revised_notes}
+        pdf_bytes, png_bytes = await score_generator.generate_score(revised_arrangement, inst_en)
+
+        # 6. 새 파일 업로드 (타임스탬프로 구분)
+        ts = int(time.time())
+        pdf_url = ""
+        png_url = ""
+
+        if pdf_bytes:
+            pdf_key = f"scores/{arrangement_id}/{inst_en}_revised_{ts}.pdf"
+            sb.storage.from_("scores").upload(pdf_key, pdf_bytes, {"content-type": "application/pdf"})
+            pdf_url = sb.storage.from_("scores").get_public_url(pdf_key)
+
+        if png_bytes:
+            png_key = f"scores/{arrangement_id}/{inst_en}_revised_{ts}.png"
+            sb.storage.from_("scores").upload(png_key, png_bytes, {"content-type": "image/png"})
+            png_url = sb.storage.from_("scores").get_public_url(png_key)
+
+        # 7. scores 테이블 업데이트
+        sb.table("scores").update({
+            "pdf_url": pdf_url,
+            "png_url": png_url,
+        }).eq("arrangement_id", arrangement_id).eq("instrument", instrument_kr).execute()
+
+        # 8. arrangement.json도 수정된 음표로 업데이트
+        try:
+            if inst_en in arrangement.get("instruments", {}):
+                arrangement["instruments"][inst_en]["notes"] = revised_notes
+            updated_json = json.dumps(arrangement).encode()
+            sb.storage.from_("scores").upload(
+                json_key, updated_json, {"content-type": "application/json", "x-upsert": "true"}
+            )
+        except Exception:
+            pass
+
+        _revision_tasks[task_key] = {
+            "status": "done",
+            "score": {"instrument": instrument_kr, "pdf_url": pdf_url, "png_url": png_url},
+        }
+
+    except Exception as e:
+        _revision_tasks[task_key] = {"status": "error", "score": None, "error": str(e)}
+
+
+@router.post("/{arrangement_id}/revise", status_code=202)
+async def request_revision(
+    arrangement_id: str,
+    body: ReviseRequest,
+    background_tasks: BackgroundTasks,
+):
+    """특정 악기 악보 수정 요청. 즉시 202 반환 후 백그라운드에서 처리."""
+    task_key = f"{arrangement_id}:{body.instrument}"
+    _revision_tasks[task_key] = {"status": "revising", "score": None}
+    background_tasks.add_task(_revise_instrument, arrangement_id, body.instrument, body.feedback)
+    return {"status": "revising"}
+
+
+@router.get("/{arrangement_id}/revise/{instrument}/status", response_model=RevisionStatus)
+async def get_revision_status(arrangement_id: str, instrument: str):
+    """악기별 수정 작업 상태 조회."""
+    task_key = f"{arrangement_id}:{instrument}"
+    task = _revision_tasks.get(task_key)
+    if not task:
+        return RevisionStatus(status="idle")
+    score = None
+    if task.get("score"):
+        score = ScoreResult(**task["score"])
+    return RevisionStatus(
+        status=task["status"],
+        score=score,
+        error=task.get("error"),
     )

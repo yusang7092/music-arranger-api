@@ -250,6 +250,48 @@ Provide a concise summary that would help a music arranger create a high-quality
     return ""
 
 
+async def revise_instrument(
+    current_notes: list,
+    instrument_kr: str,
+    instrument_en: str,
+    feedback: str,
+    tempo: int = 120,
+    time_signature: str = "4/4",
+) -> list:
+    """특정 악기의 편곡을 사용자 피드백 기반으로 수정."""
+    pitch_range = INSTRUMENT_RANGES.get(instrument_en, (48, 84))
+    prompt = f"""You are a professional music arranger. Revise this musical arrangement for {instrument_en} based on the user's feedback.
+
+## Current Arrangement
+- Instrument: {instrument_en} ({instrument_kr})
+- Tempo: {tempo} BPM
+- Time Signature: {time_signature}
+- Pitch range (MIDI): {pitch_range[0]} to {pitch_range[1]}
+
+### Current notes (first 60 shown)
+{json.dumps(current_notes[:60], indent=2)}
+
+## User Feedback
+{feedback}
+
+## Task
+Create a revised arrangement that directly addresses the feedback above.
+- Keep the same tempo and time signature
+- Strictly respect the instrument's pitch range ({pitch_range[0]}–{pitch_range[1]})
+- Maintain similar duration and musical coherence
+- Return at least 20 notes
+
+## Output Format (STRICT JSON — no other text)
+{{
+  "notes": [
+    {{"pitch": 60, "onset": 0.0, "duration": 0.5, "velocity": 80}},
+    ...
+  ]
+}}"""
+    result = await _call_openrouter(prompt, "google/gemini-2.5-flash")
+    return result.get("notes", [])
+
+
 async def arrange_quick(notes_data: dict, instruments: list[str], filename: str = "") -> dict:
     references = await search_song_references(filename) if filename else ""
     prompt = _build_quick_prompt(notes_data, instruments, references)

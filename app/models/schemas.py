@@ -21,6 +21,17 @@ class ArrangeStatus(BaseModel):
     scores: list[ScoreResult] | None = None
 
 
+class ReviseRequest(BaseModel):
+    instrument: str   # Korean name, e.g. "바이올린"
+    feedback: str     # User's description of what to change
+
+
+class RevisionStatus(BaseModel):
+    status: str       # "idle" | "revising" | "done" | "error"
+    score: Optional[ScoreResult] = None
+    error: Optional[str] = None
+
+
 class HealthResponse(BaseModel):
     status: str
     version: str
