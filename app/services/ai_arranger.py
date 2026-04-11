@@ -55,8 +55,13 @@ INSTRUMENT_RANGES = {
 
 
 def _build_quick_prompt(notes_data: dict, instruments: list[str], references: str = "") -> str:
-    # 음표 데이터를 압축 (너무 길면 앞 100개만)
-    notes_sample = notes_data.get("notes", [])[:100]
+    # 전체 곡에서 고르게 샘플링 (앞부분만 보내면 AI가 앞부분 위주로 편곡함)
+    all_notes = notes_data.get("notes", [])
+    if len(all_notes) > 120:
+        step = len(all_notes) // 120
+        notes_sample = all_notes[::step][:120]
+    else:
+        notes_sample = all_notes
 
     instrument_list = []
     for inst in instruments:
@@ -120,7 +125,7 @@ Return ONLY valid JSON, no other text:
   }}
 }}
 
-Generate between 40 and 120 notes per instrument covering the first 60 seconds of the song. Pitch is MIDI number (0-127)."""
+Generate 80-150 notes per instrument distributed across the FULL song duration (intro → verse → chorus → bridge → outro). Do NOT limit to just the beginning — cover the entire song structure. Pitch is MIDI number (0-127)."""
 
 
 def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references: str = "") -> str:
@@ -199,7 +204,7 @@ Return ONLY valid JSON, no other text:
   }}
 }}
 
-Generate between 40 and 120 notes per instrument covering the first 60 seconds of the song. Pitch is MIDI number (0-127)."""
+Generate 80-150 notes per instrument distributed across the FULL song duration (intro → verse → chorus → bridge → outro). Do NOT limit to just the beginning — cover the entire song structure. Pitch is MIDI number (0-127)."""
 
 
 async def _call_openrouter(prompt: str, model: str) -> dict:
