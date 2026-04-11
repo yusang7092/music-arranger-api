@@ -8,6 +8,13 @@ router = APIRouter(prefix="/arrange", tags=["arrange"])
 # 수정 작업 상태 추적 (in-memory, 단일 인스턴스 서버)
 _revision_tasks: dict[str, dict] = {}   # key: f"{arrangement_id}:{instrument_kr}"
 
+# 편곡 진행도 추적
+_progress: dict[str, dict] = {}  # key: arrangement_id, value: {progress, stage}
+
+
+def _set_progress(arrangement_id: str, progress: int, stage: str) -> None:
+    _progress[arrangement_id] = {"progress": progress, "stage": stage}
+
 
 async def _process_arrangement(
     arrangement_id: str,
@@ -17,21 +24,31 @@ async def _process_arrangement(
     import os
     from app.services import audio_processor, ai_arranger, score_generator
 
+    n = len(request.instruments) or 1
+
     try:
         # 1. 상태 → processing
+        _set_progress(arrangement_id, 3, "시작 중...")
         supabase.table("arrangements").update(
             {"status": "processing"}
         ).eq("id", arrangement_id).execute()
 
-        # 2. 음표 추출 / 스템 분리 (+ 곡 검색은 AI 함수 내부에서 병렬 실행)
+        # 2. 음표 추출 / 스템 분리
         original_filename = request.original_filename or ""
         if request.mode == "quick":
+            _set_progress(arrangement_id, 10, "음원에서 음표 추출 중")
             notes_data = await audio_processor.extract_notes_basic_pitch(file_path)
+            _set_progress(arrangement_id, 40, "AI 편곡 중")
             arrangement = await ai_arranger.arrange_quick(notes_data, request.instruments, original_filename)
         else:  # thorough
+            _set_progress(arrangement_id, 8, "스템 분리 중 (보컬·악기 분리)")
             stems_data = await audio_processor.separate_stems_demucs(file_path)
+            _set_progress(arrangement_id, 38, "각 파트 음표 추출 중")
             stems_notes = await audio_processor.extract_notes_from_stems(stems_data)
+            _set_progress(arrangement_id, 58, "AI 편곡 중")
             arrangement = await ai_arranger.arrange_thorough(stems_notes, request.instruments, original_filename)
+
+        _set_progress(arrangement_id, 70, "편곡 완료 — 악보 저장 중")
 
         # 3. AI 편곡 결과 JSON을 Storage에 저장 (수정 요청 시 재활용)
         try:
@@ -50,25 +67,23 @@ async def _process_arrangement(
         score_records = []
         instruments_in_arrangement = arrangement.get("instruments", {})
 
-        for inst_spec in request.instruments:
-            # "바이올린_2" → "바이올린", 2
+        for idx, inst_spec in enumerate(request.instruments):
+            inst_progress = 70 + int((idx / n) * 25)
             parts = inst_spec.split("_")
             inst_kr = parts[0]
-            count = int(parts[1]) if len(parts) > 1 else 1
+
+            _set_progress(arrangement_id, inst_progress, f"{inst_kr} 악보 생성 중 ({idx + 1}/{n})")
 
             from app.services.ai_arranger import INSTRUMENT_MAP
             inst_en = INSTRUMENT_MAP.get(inst_kr, inst_kr)
 
-            # AI 편곡 결과에서 해당 악기 데이터 가져오기
             inst_arrangement = instruments_in_arrangement.get(inst_en, {})
             if not inst_arrangement:
-                # 영어명 매핑 실패 시 첫 번째 키 사용
                 for key, val in instruments_in_arrangement.items():
                     if inst_kr.lower() in key.lower() or key.lower() in inst_en.lower():
                         inst_arrangement = val
                         break
 
-            # 악보 생성
             arrangement_for_gen = {
                 "tempo": arrangement.get("tempo", 120),
                 "time_signature": arrangement.get("time_signature", "4/4"),
@@ -79,7 +94,6 @@ async def _process_arrangement(
                 arrangement_for_gen, inst_en
             )
 
-            # Supabase Storage 업로드
             from app.core.supabase import supabase as sb
 
             pdf_url = ""
@@ -106,23 +120,23 @@ async def _process_arrangement(
                 "png_url": png_url,
             })
 
-        # 4. scores 테이블에 삽입
+        _set_progress(arrangement_id, 97, "마무리 중...")
+
         if score_records:
             supabase.table("scores").insert(score_records).execute()
 
-        # 5. 상태 → done
+        _set_progress(arrangement_id, 100, "완료")
         supabase.table("arrangements").update(
             {"status": "done"}
         ).eq("id", arrangement_id).execute()
 
     except Exception as e:
-        # 에러 시 상태 업데이트
+        _set_progress(arrangement_id, 0, f"오류: {str(e)[:60]}")
         supabase.table("arrangements").update(
             {"status": "error"}
         ).eq("id", arrangement_id).execute()
         raise
     finally:
-        # 임시 파일 정리
         import os
         if os.path.exists(file_path):
             os.remove(file_path)
@@ -203,10 +217,13 @@ async def get_arrangement_status(arrangement_id: str):
         ]
 
     data = response.data
+    prog = _progress.get(arrangement_id, {})
     return ArrangeStatus(
         id=data["id"],
         status=data["status"],
         scores=scores,
+        progress=prog.get("progress", 0),
+        stage=prog.get("stage", ""),
     )
 
 

@@ -19,6 +19,8 @@ class ArrangeStatus(BaseModel):
     id: str
     status: str             # "pending" | "processing" | "done" | "error"
     scores: list[ScoreResult] | None = None
+    progress: int = 0       # 0-100
+    stage: str = ""         # 현재 처리 단계 설명
 
 
 class ReviseRequest(BaseModel):
