@@ -39,14 +39,14 @@ async def _process_arrangement(
             _set_progress(arrangement_id, 10, "음원에서 음표 추출 중")
             notes_data = await audio_processor.extract_notes_basic_pitch(file_path)
             _set_progress(arrangement_id, 40, "AI 편곡 중")
-            arrangement = await ai_arranger.arrange_quick(notes_data, request.instruments, original_filename)
+            arrangement = await ai_arranger.arrange_quick(notes_data, request.instruments, original_filename, request.target_instrument)
         else:  # thorough
             _set_progress(arrangement_id, 8, "스템 분리 중 (보컬·악기 분리)")
             stems_data = await audio_processor.separate_stems_demucs(file_path)
             _set_progress(arrangement_id, 38, "각 파트 음표 추출 중")
             stems_notes = await audio_processor.extract_notes_from_stems(stems_data)
             _set_progress(arrangement_id, 58, "AI 편곡 중")
-            arrangement = await ai_arranger.arrange_thorough(stems_notes, request.instruments, original_filename)
+            arrangement = await ai_arranger.arrange_thorough(stems_notes, request.instruments, original_filename, request.target_instrument)
 
         _set_progress(arrangement_id, 70, "편곡 완료 — 악보 저장 중")
 
@@ -67,12 +67,18 @@ async def _process_arrangement(
         score_records = []
         instruments_in_arrangement = arrangement.get("instruments", {})
 
-        for idx, inst_spec in enumerate(request.instruments):
-            inst_progress = 70 + int((idx / n) * 25)
-            parts = inst_spec.split("_")
-            inst_kr = parts[0]
+        # target_instrument만 악보 생성 (지정 없으면 전체)
+        target_kr = request.target_instrument
+        score_instruments = [request.target_instrument] if target_kr else [
+            inst_spec.split("_")[0] for inst_spec in request.instruments
+        ]
+        n_score = len(score_instruments) or 1
 
-            _set_progress(arrangement_id, inst_progress, f"{inst_kr} 악보 생성 중 ({idx + 1}/{n})")
+        for idx, inst_kr in enumerate(score_instruments):
+            inst_progress = 70 + int((idx / n_score) * 25)
+            inst_spec = next((s for s in request.instruments if s.split("_")[0] == inst_kr), inst_kr)
+
+            _set_progress(arrangement_id, inst_progress, f"{inst_kr} 악보 생성 중 ({idx + 1}/{n_score})")
 
             from app.services.ai_arranger import INSTRUMENT_MAP
             inst_en = INSTRUMENT_MAP.get(inst_kr, inst_kr)
@@ -150,6 +156,7 @@ async def start_arrangement(
     instruments: list[str] = Form([]),
     mode: str = Form("quick"),
     original_filename: str = Form(""),
+    target_instrument: str = Form(""),
 ):
     """
     Upload an audio file and start the arrangement pipeline.
@@ -194,6 +201,7 @@ async def start_arrangement(
         instruments=instruments,
         mode=mode,
         original_filename=original_filename,
+        target_instrument=target_instrument,
     )
     background_tasks.add_task(_process_arrangement, arrangement_id, tmp_path, request)
 

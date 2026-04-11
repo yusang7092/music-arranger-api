@@ -6,7 +6,8 @@ class ArrangeRequest(BaseModel):
     arrangement_id: str
     instruments: list[str]  # e.g. ["바이올린_2", "피아노"]
     mode: str               # "quick" | "thorough"
-    original_filename: str = ""  # 곡 검색에 활용
+    original_filename: str = ""
+    target_instrument: str = ""  # 악보를 받을 악기 (한글)
 
 
 class ScoreResult(BaseModel):

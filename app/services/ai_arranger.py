@@ -54,7 +54,7 @@ INSTRUMENT_RANGES = {
 }
 
 
-def _build_quick_prompt(notes_data: dict, instruments: list[str], references: str = "") -> str:
+def _build_quick_prompt(notes_data: dict, instruments: list[str], references: str = "", target_instrument: str = "") -> str:
     # 전체 곡에서 고르게 샘플링 (앞부분만 보내면 AI가 앞부분 위주로 편곡함)
     all_notes = notes_data.get("notes", [])
     if len(all_notes) > 120:
@@ -73,10 +73,12 @@ def _build_quick_prompt(notes_data: dict, instruments: list[str], references: st
         instrument_list.append({"korean": name_kr, "english": name_en, "count": count})
 
     references_section = f"\n## Song Research & References\n{references}\n" if references else ""
+    target_en = INSTRUMENT_MAP.get(target_instrument, target_instrument) if target_instrument else ""
+    target_section = f"\n## Score Output Target\nOnly output notes for **{target_instrument} ({target_en})**. Arrange the full ensemble mentally, but include ONLY this instrument's part in the JSON output.\n" if target_instrument else ""
 
     return f"""You are a professional ensemble arranger. Analyze the original audio and create a natural arrangement where each instrument plays a musically appropriate role.
 
-{references_section}
+{references_section}{target_section}
 ## Original Audio Notes (sample)
 ```json
 {json.dumps(notes_sample, indent=2)}
@@ -128,7 +130,7 @@ Return ONLY valid JSON, no other text:
 Generate 80-150 notes per instrument distributed across the FULL song duration (intro → verse → chorus → bridge → outro). Do NOT limit to just the beginning — cover the entire song structure. Pitch is MIDI number (0-127)."""
 
 
-def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references: str = "") -> str:
+def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references: str = "", target_instrument: str = "") -> str:
     instrument_list = []
     for inst in instruments:
         parts = inst.split("_")
@@ -151,10 +153,12 @@ def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references
         }
 
     references_section = f"\n## Song Research & References\n{references}\n" if references else ""
+    target_en = INSTRUMENT_MAP.get(target_instrument, target_instrument) if target_instrument else ""
+    target_section = f"\n## Score Output Target\nOnly output notes for **{target_instrument} ({target_en})**. Arrange the full ensemble mentally, but include ONLY this instrument's part in the JSON output.\n" if target_instrument else ""
 
     return f"""You are a professional orchestral arranger with expertise in voice leading and orchestration.
 Analyze the original audio stems and create a natural ensemble arrangement — each instrument plays a distinct, musically appropriate role.
-{references_section}
+{references_section}{target_section}
 ## Stem Analysis (original audio broken into parts)
 ```json
 {json.dumps(stems_summary, indent=2)}
@@ -344,13 +348,13 @@ Create a revised arrangement that directly addresses the feedback above.
     return result.get("notes", [])
 
 
-async def arrange_quick(notes_data: dict, instruments: list[str], filename: str = "") -> dict:
+async def arrange_quick(notes_data: dict, instruments: list[str], filename: str = "", target_instrument: str = "") -> dict:
     references = await search_song_references(filename) if filename else ""
-    prompt = _build_quick_prompt(notes_data, instruments, references)
+    prompt = _build_quick_prompt(notes_data, instruments, references, target_instrument)
     return await _call_openrouter(prompt, "google/gemini-2.5-flash")
 
 
-async def arrange_thorough(stems_notes: dict, instruments: list[str], filename: str = "") -> dict:
+async def arrange_thorough(stems_notes: dict, instruments: list[str], filename: str = "", target_instrument: str = "") -> dict:
     references = await search_song_references(filename) if filename else ""
-    prompt = _build_thorough_prompt(stems_notes, instruments, references)
+    prompt = _build_thorough_prompt(stems_notes, instruments, references, target_instrument)
     return await _call_openrouter(prompt, "anthropic/claude-sonnet-4-5")
