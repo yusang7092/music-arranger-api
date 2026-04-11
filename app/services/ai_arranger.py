@@ -120,7 +120,7 @@ Return ONLY valid JSON, no other text:
   }}
 }}
 
-Return at least 30 notes per instrument. Pitch is MIDI number (0-127)."""
+Generate between 40 and 120 notes per instrument covering the first 60 seconds of the song. Pitch is MIDI number (0-127)."""
 
 
 def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references: str = "") -> str:
@@ -199,7 +199,7 @@ Return ONLY valid JSON, no other text:
   }}
 }}
 
-Return at least 30 notes per instrument. Pitch is MIDI number (0-127)."""
+Generate between 40 and 120 notes per instrument covering the first 60 seconds of the song. Pitch is MIDI number (0-127)."""
 
 
 async def _call_openrouter(prompt: str, model: str) -> dict:
@@ -213,7 +213,7 @@ async def _call_openrouter(prompt: str, model: str) -> dict:
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 8192,
+        "max_tokens": 32000,
         "temperature": 0.7,
         "response_format": {"type": "json_object"},
     }
