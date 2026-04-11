@@ -182,24 +182,40 @@ async def _call_openrouter(prompt: str, model: str) -> dict:
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         "temperature": 0.7,
+        "response_format": {"type": "json_object"},
     }
 
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=180.0) as client:
         response = await client.post(OPENROUTER_URL, json=payload, headers=headers)
         response.raise_for_status()
 
     result = response.json()
     content = result["choices"][0]["message"]["content"]
 
-    # JSON 파싱 (마크다운 코드블록 제거)
+    # 1차: 마크다운 코드블록 제거
     if "```json" in content:
         content = content.split("```json")[1].split("```")[0].strip()
     elif "```" in content:
         content = content.split("```")[1].split("```")[0].strip()
 
-    return json.loads(content)
+    # 2차: 직접 파싱 시도
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    # 3차: 정규식으로 JSON 객체 추출
+    import re
+    match = re.search(r'\{[\s\S]*\}', content)
+    if match:
+        try:
+            return json.loads(match.group())
+        except json.JSONDecodeError:
+            pass
+
+    raise ValueError(f"AI 응답을 JSON으로 파싱할 수 없습니다. 응답 앞부분: {content[:200]}")
 
 
 async def search_song_references(filename: str) -> str:
