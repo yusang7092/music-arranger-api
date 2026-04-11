@@ -149,6 +149,7 @@ async def start_arrangement(
     arrangement_id: str = "",
     instruments: list[str] = [],
     mode: str = "quick",
+    original_filename: str = "",
 ):
     """
     Upload an audio file and start the arrangement pipeline.
@@ -175,6 +176,7 @@ async def start_arrangement(
         arrangement_id=arrangement_id,
         instruments=instruments,
         mode=mode,
+        original_filename=original_filename,
     )
     background_tasks.add_task(_process_arrangement, arrangement_id, tmp_path, request)
 
