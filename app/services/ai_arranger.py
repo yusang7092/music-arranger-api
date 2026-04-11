@@ -69,25 +69,41 @@ def _build_quick_prompt(notes_data: dict, instruments: list[str], references: st
 
     references_section = f"\n## Song Research & References\n{references}\n" if references else ""
 
-    return f"""You are a professional music arranger. Given extracted note data from an audio file, create a musical arrangement for the specified instruments.
+    lead_instrument = instrument_list[0] if instrument_list else None
+    supporting_instruments = instrument_list[1:] if len(instrument_list) > 1 else []
+
+    return f"""You are a professional ensemble arranger. Your job is to create a realistic ensemble arrangement where each instrument has a DISTINCT role — NOT all playing the melody.
+
 {references_section}
-## Extracted Notes (sample)
+## Original Audio Notes (sample)
 ```json
 {json.dumps(notes_sample, indent=2)}
 ```
-
-Pitch range of original: {notes_data.get('pitch_range', {})}
+Pitch range: {notes_data.get('pitch_range', {})}
 Total duration: {notes_data.get('total_duration', 0):.1f} seconds
 
-## Target Instruments
-{json.dumps(instrument_list, indent=2)}
+## Instruments & Their Roles
 
-## Task
-Create a musical arrangement assigning notes to each instrument. For each instrument:
-1. Use the Song Research section above to inform key, tempo, and style choices
-2. Assign appropriate notes based on the instrument's range and character
-3. Maintain musical coherence and harmony
-4. Consider the instrument's typical role (melody, harmony, bass, rhythm)
+### LEAD instrument (plays the main melody):
+- {json.dumps(lead_instrument)}
+- This instrument carries the main melody extracted from the audio
+- Use the actual melody notes from the extracted data
+
+### SUPPORTING instruments (do NOT play the melody — they enrich and accompany):
+{json.dumps(supporting_instruments, indent=2)}
+
+Each supporting instrument must choose ONE of these roles:
+- **Harmony/Chords**: Play chord tones that complement the melody (e.g., piano, guitar)
+- **Counter-melody**: Play a secondary melodic line that doesn't clash with the lead (e.g., violin, flute)
+- **Bass line**: Provide low-end foundation following the harmony (e.g., cello, bass)
+- **Rhythm/Texture**: Provide rhythmic pulse or sustained texture (e.g., strings, drums)
+
+## CRITICAL RULES
+1. Only the LEAD instrument plays the main melody
+2. Supporting instruments MUST NOT duplicate the lead melody note-for-note
+3. Each supporting instrument should sound empty without the lead — they exist to make the lead shine
+4. Velocity of supporting instruments: 50-70 (softer than lead at 80-100)
+5. Assign roles based on instrument characteristics and pitch range
 
 ## Output Format (STRICT JSON)
 Return ONLY valid JSON, no other text:
@@ -96,6 +112,7 @@ Return ONLY valid JSON, no other text:
   "time_signature": "4/4",
   "instruments": {{
     "<instrument_english_name>": {{
+      "role": "lead|harmony|counter-melody|bass|rhythm",
       "notes": [
         {{"pitch": 60, "onset": 0.0, "duration": 0.5, "velocity": 80}},
         ...
@@ -104,7 +121,7 @@ Return ONLY valid JSON, no other text:
   }}
 }}
 
-Important: pitch is MIDI number (0-127). Return at least 20 notes per instrument."""
+Return at least 30 notes per instrument. Pitch is MIDI number (0-127)."""
 
 
 def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references: str = "") -> str:
@@ -131,35 +148,53 @@ def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references
 
     references_section = f"\n## Song Research & References\n{references}\n" if references else ""
 
+    lead_instrument = instrument_list[0] if instrument_list else None
+    supporting_instruments = instrument_list[1:] if len(instrument_list) > 1 else []
+
     return f"""You are a professional orchestral arranger with expertise in voice leading and orchestration.
+Your task is to create a REAL ensemble arrangement — each instrument has a distinct role, just like a real band or orchestra.
 {references_section}
-## Stem Analysis
+## Stem Analysis (original audio breakdown)
 ```json
 {json.dumps(stems_summary, indent=2)}
 ```
 
-## Target Instruments
+## Instruments & Their Roles
+
+### LEAD instrument (carries the main melody):
 ```json
-{json.dumps(instrument_list, indent=2)}
+{json.dumps(lead_instrument)}
+```
+- Extract the main melodic line from the "vocals" or highest-pitched stem
+- This instrument should be clearly heard above the others
+
+### SUPPORTING instruments (enrich and accompany — do NOT copy the lead melody):
+```json
+{json.dumps(supporting_instruments, indent=2)}
 ```
 
-## Task
-Create a professional orchestral arrangement:
-1. Apply proper voice leading principles
-2. Respect each instrument's pitch range strictly
-3. Use appropriate articulations and dynamics
-4. Distribute melody, harmony, and bass parts appropriately
-5. If the original has no specific instrument, create an idiomatic arrangement
+Assign each supporting instrument one role:
+- **Harmony**: Sustained chord tones, fills gaps between melody phrases
+- **Counter-melody**: Independent secondary melody that weaves around the lead
+- **Bass**: Root notes and bass movement, follows chord changes
+- **Rhythm/Texture**: Rhythmic accompaniment or sustained texture
+
+## CRITICAL RULES
+1. Only the LEAD instrument plays the main melody
+2. Supporting instruments must NEVER double the lead note-for-note
+3. Use proper voice leading between supporting parts
+4. Lead velocity: 85-100 | Supporting velocity: 45-70 (always softer)
+5. Respect each instrument's physical pitch range strictly
 
 ## Output Format (STRICT JSON)
-Return ONLY valid JSON:
+Return ONLY valid JSON, no other text:
 {{
   "tempo": 120,
   "time_signature": "4/4",
   "key": "C major",
   "instruments": {{
     "<instrument_english_name>": {{
-      "role": "melody|harmony|bass|rhythm",
+      "role": "lead|harmony|counter-melody|bass|rhythm",
       "notes": [
         {{"pitch": 60, "onset": 0.0, "duration": 0.5, "velocity": 80}},
         ...
@@ -168,7 +203,7 @@ Return ONLY valid JSON:
   }}
 }}
 
-Return at least 30 notes per instrument. Ensure notes respect each instrument's pitch range."""
+Return at least 30 notes per instrument. Pitch is MIDI number (0-127)."""
 
 
 async def _call_openrouter(prompt: str, model: str) -> dict:
