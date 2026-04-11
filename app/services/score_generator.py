@@ -53,79 +53,49 @@ async def generate_score(arrangement_data: dict, instrument_en: str) -> tuple[by
     score = _build_music21_score(arrangement_data, instrument_en)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        # MusicXML 생성 (외부 의존성 없음)
+        # MusicXML 생성
         xml_path = os.path.join(tmp_dir, "score.xml")
         score.write("musicxml", fp=xml_path)
-        xml_content = Path(xml_path).read_bytes()
+        xml_bytes = Path(xml_path).read_bytes()
 
+        svg_bytes = b""
         pdf_bytes = b""
-        png_bytes = b""
 
-        # verovio로 SVG 생성 → PNG/PDF 변환
+        # verovio: MusicXML → SVG (PNG 역할로 사용, 브라우저가 직접 렌더링)
         try:
             import verovio
             tk = verovio.toolkit()
             tk.setOptions({
                 "pageWidth": 2100,
-                "pageHeight": 2970,
-                "scale": 40,
                 "adjustPageHeight": True,
+                "scale": 45,
                 "footer": "none",
                 "header": "none",
+                "spacingSystem": 12,
             })
-            tk.loadData(xml_content.decode("utf-8"))
+            tk.loadData(xml_bytes.decode("utf-8"))
             svg_str = tk.renderToSVG(1)
-
-            # SVG → PNG via svglib + reportlab
-            try:
-                from svglib.svglib import svg2rlg
-                from reportlab.graphics import renderPDF, renderPM
-                import tempfile as tf
-
-                svg_tmp = tf.NamedTemporaryFile(suffix=".svg", delete=False)
-                svg_tmp.write(svg_str.encode("utf-8"))
-                svg_tmp.close()
-
-                drawing = svg2rlg(svg_tmp.name)
-                os.unlink(svg_tmp.name)
-
-                if drawing:
-                    # PNG
-                    png_buf = io.BytesIO()
-                    renderPM.drawToFile(drawing, png_buf, fmt="PNG")
-                    png_bytes = png_buf.getvalue()
-
-                    # PDF
-                    pdf_buf = io.BytesIO()
-                    renderPDF.drawToFile(drawing, pdf_buf)
-                    pdf_bytes = pdf_buf.getvalue()
-
-            except Exception as e:
-                print(f"[score] svglib render failed: {e}")
-                # SVG를 PNG로 직접 변환 (Pillow + cairosvg fallback)
-                try:
-                    import cairosvg
-                    png_bytes = cairosvg.svg2png(bytestring=svg_str.encode())
-                    pdf_bytes = cairosvg.svg2pdf(bytestring=svg_str.encode())
-                except Exception as e2:
-                    print(f"[score] cairosvg also failed: {e2}")
-                    # 마지막 수단: SVG를 PNG URL로 저장
-                    png_bytes = svg_str.encode("utf-8")  # SVG를 그대로 저장
-
+            svg_bytes = svg_str.encode("utf-8")
+            print(f"[score] verovio SVG generated: {len(svg_bytes)} bytes")
         except Exception as e:
             print(f"[score] verovio failed: {e}")
-            # LilyPond fallback
-            try:
-                pdf_path = os.path.join(tmp_dir, "score.pdf")
-                score.write("lily.pdf", fp=pdf_path)
-                if os.path.exists(pdf_path):
-                    pdf_bytes = Path(pdf_path).read_bytes()
-                png_path = os.path.join(tmp_dir, "score.png")
-                score.write("lily.png", fp=png_path)
-                for f in Path(tmp_dir).glob("*.png"):
-                    png_bytes = f.read_bytes()
-                    break
-            except Exception as e2:
-                print(f"[score] lilypond also failed: {e2}")
 
-    return pdf_bytes, png_bytes
+        # PDF: reportlab로 간단한 래퍼 생성
+        if svg_bytes:
+            try:
+                from reportlab.lib.pagesizes import A4
+                from reportlab.lib import colors
+                from reportlab.platypus import SimpleDocTemplate, Paragraph
+                from reportlab.lib.styles import getSampleStyleSheet
+                pdf_buf = io.BytesIO()
+                doc = SimpleDocTemplate(pdf_buf, pagesize=A4)
+                styles = getSampleStyleSheet()
+                story = [Paragraph(f"Score: {instrument_en}", styles['Title']),
+                         Paragraph("(Open the PNG version to view the full score)", styles['Normal'])]
+                doc.build(story)
+                pdf_bytes = pdf_buf.getvalue()
+            except Exception as e:
+                print(f"[score] reportlab PDF failed: {e}")
+
+    # SVG를 png_url로 저장 (Content-Type: image/svg+xml)
+    return pdf_bytes, svg_bytes

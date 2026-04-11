@@ -113,9 +113,13 @@ async def _process_arrangement(
                 pdf_url = sb.storage.from_("scores").get_public_url(pdf_key)
 
             if png_bytes:
-                png_key = f"scores/{arrangement_id}/{inst_en}_score.png"
+                # verovio는 SVG를 반환하므로 .svg로 저장 (브라우저 직접 렌더링)
+                is_svg = png_bytes[:5] == b"<?xml" or png_bytes[:4] == b"<svg"
+                ext = "svg" if is_svg else "png"
+                ct = "image/svg+xml" if is_svg else "image/png"
+                png_key = f"scores/{arrangement_id}/{inst_en}_score.{ext}"
                 sb.storage.from_("scores").upload(
-                    png_key, png_bytes, {"content-type": "image/png"}
+                    png_key, png_bytes, {"content-type": ct, "x-upsert": "true"}
                 )
                 png_url = sb.storage.from_("scores").get_public_url(png_key)
 
