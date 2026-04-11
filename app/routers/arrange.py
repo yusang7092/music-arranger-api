@@ -1,5 +1,5 @@
 import json
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks, HTTPException
 from app.models.schemas import ArrangeRequest, ArrangeStatus, ScoreResult, ReviseRequest, RevisionStatus
 from app.core.supabase import supabase
 
@@ -146,10 +146,10 @@ async def _process_arrangement(
 async def start_arrangement(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    arrangement_id: str = "",
-    instruments: list[str] = [],
-    mode: str = "quick",
-    original_filename: str = "",
+    arrangement_id: str = Form(""),
+    instruments: list[str] = Form([]),
+    mode: str = Form("quick"),
+    original_filename: str = Form(""),
 ):
     """
     Upload an audio file and start the arrangement pipeline.
