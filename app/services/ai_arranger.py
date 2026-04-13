@@ -57,9 +57,9 @@ INSTRUMENT_RANGES = {
 def _build_quick_prompt(notes_data: dict, instruments: list[str], references: str = "", target_instrument: str = "") -> str:
     # 전체 곡에서 고르게 샘플링 (앞부분만 보내면 AI가 앞부분 위주로 편곡함)
     all_notes = notes_data.get("notes", [])
-    if len(all_notes) > 120:
-        step = len(all_notes) // 120
-        notes_sample = all_notes[::step][:120]
+    if len(all_notes) > 400:
+        step = len(all_notes) // 400
+        notes_sample = all_notes[::step][:400]
     else:
         notes_sample = all_notes
 
@@ -127,7 +127,7 @@ Return ONLY valid JSON, no other text:
   }}
 }}
 
-Generate 80-150 notes per instrument distributed across the FULL song duration (intro → verse → chorus → bridge → outro). Do NOT limit to just the beginning — cover the entire song structure. Pitch is MIDI number (0-127)."""
+The song is {notes_data.get('total_duration', 0):.1f} seconds long. Generate approximately {max(150, int(notes_data.get('total_duration', 60) / 60 * 250))} notes spread across the FULL duration — onset values must reach close to {notes_data.get('total_duration', 0):.1f}s (intro → verse → chorus → bridge → outro). Do NOT cluster notes only at the beginning. Pitch is MIDI number (0-127)."""
 
 
 def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references: str = "", target_instrument: str = "") -> str:
@@ -146,11 +146,21 @@ def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references
         })
 
     stems_summary = {}
+    total_duration = 0.0
     for stem, notes in stems_notes.items():
+        # 스템 전체에서 고르게 100개 샘플링
+        if len(notes) > 100:
+            step = len(notes) // 100
+            sample = notes[::step][:100]
+        else:
+            sample = notes
         stems_summary[stem] = {
             "note_count": len(notes),
-            "sample": notes[:30]
+            "sample": sample
         }
+        if notes:
+            stem_end = max((n.get("onset", 0) + n.get("duration", 0)) for n in notes)
+            total_duration = max(total_duration, stem_end)
 
     references_section = f"\n## Song Research & References\n{references}\n" if references else ""
     target_en = INSTRUMENT_MAP.get(target_instrument, target_instrument) if target_instrument else ""
@@ -208,7 +218,7 @@ Return ONLY valid JSON, no other text:
   }}
 }}
 
-Generate 80-150 notes per instrument distributed across the FULL song duration (intro → verse → chorus → bridge → outro). Do NOT limit to just the beginning — cover the entire song structure. Pitch is MIDI number (0-127)."""
+The song is {total_duration:.1f} seconds long. Generate approximately {max(150, int(total_duration / 60 * 250))} notes spread across the FULL duration — onset values must reach close to {total_duration:.1f}s (intro → verse → chorus → bridge → outro). Do NOT cluster notes only at the beginning. Pitch is MIDI number (0-127)."""
 
 
 async def _call_openrouter(prompt: str, model: str) -> dict:
