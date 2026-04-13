@@ -28,6 +28,23 @@ def _split_into_valid_durations(ql: float) -> list:
     return result if result else [0.25]
 
 
+BASS_CLEF_INSTRUMENTS = {'cello', 'contrabass', 'bass guitar', 'tuba', 'bassoon'}
+TENOR_CLEF_INSTRUMENTS = {'trombone', 'horn'}
+ALTO_CLEF_INSTRUMENTS = {'viola'}
+
+
+def _get_clef(instrument_en: str):
+    from music21 import clef
+    name = instrument_en.lower()
+    if name in BASS_CLEF_INSTRUMENTS:
+        return clef.BassClef()
+    if name in ALTO_CLEF_INSTRUMENTS:
+        return clef.AltoClef()
+    if name in TENOR_CLEF_INSTRUMENTS:
+        return clef.TenorClef()
+    return clef.TrebleClef()
+
+
 def _build_music21_score(arrangement_data: dict, instrument_en: str):
     from music21 import stream, note, instrument as m21instrument, tempo, meter
 
@@ -43,6 +60,7 @@ def _build_music21_score(arrangement_data: dict, instrument_en: str):
 
     bpm = arrangement_data.get("tempo", 120)
     ts_str = arrangement_data.get("time_signature", "4/4")
+    part.append(_get_clef(instrument_en))   # 음자리표 명시 (자동 변경 방지)
     part.append(tempo.MetronomeMark(number=bpm))
     part.append(meter.TimeSignature(ts_str))
 
@@ -109,7 +127,7 @@ async def generate_score(arrangement_data: dict, instrument_en: str) -> tuple[by
     with tempfile.TemporaryDirectory() as tmp_dir:
         # MusicXML 생성 — makeMeasures로 마디 구성 (makeNotation은 뒤 쉼표를 잘라냄)
         xml_path = os.path.join(tmp_dir, "score.xml")
-        score.makeMeasures(inPlace=True)
+        score.makeMeasures(inPlace=True, bestClef=False)
         score.write("musicxml", fp=xml_path)
         xml_bytes = Path(xml_path).read_bytes()
 
