@@ -134,22 +134,47 @@ async def generate_score(arrangement_data: dict, instrument_en: str) -> tuple[by
         svg_bytes = b""
         pdf_bytes = b""
 
-        # verovio: MusicXML → SVG (PNG 역할로 사용, 브라우저가 직접 렌더링)
+        # verovio: MusicXML → SVG 전 페이지 렌더링 후 세로로 합치기
         try:
-            import verovio
+            import verovio, re as _re
             tk = verovio.toolkit()
             tk.setOptions({
                 "pageWidth": 2100,
-                "adjustPageHeight": True,
+                "pageHeight": 2970,   # A4 비율, 페이지 분리 허용
+                "adjustPageHeight": False,
                 "scale": 45,
                 "footer": "none",
                 "header": "none",
-                "spacingSystem": 12,
+                "spacingSystem": 10,
             })
             tk.loadData(xml_bytes.decode("utf-8"))
-            svg_str = tk.renderToSVG(1)
-            svg_bytes = svg_str.encode("utf-8")
-            print(f"[score] verovio SVG generated: {len(svg_bytes)} bytes")
+            page_count = tk.getPageCount()
+            print(f"[score] verovio: {page_count} pages")
+
+            if page_count == 1:
+                svg_bytes = tk.renderToSVG(1).encode("utf-8")
+            else:
+                # 각 페이지 SVG를 세로로 합쳐 하나의 긴 SVG로 만들기
+                pages_svg = [tk.renderToSVG(p) for p in range(1, page_count + 1)]
+                heights = []
+                inner_contents = []
+                page_width = 2100
+                for svg in pages_svg:
+                    vb = _re.search(r'viewBox="[^"]*\s+[^"]*\s+([^\s"]+)\s+([^\s"]+)"', svg)
+                    h = float(vb.group(2)) if vb else 2970
+                    heights.append(h)
+                    inner = _re.search(r'<svg[^>]*>([\s\S]*)</svg>', svg)
+                    inner_contents.append(inner.group(1) if inner else "")
+                total_h = sum(heights)
+                combined = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {page_width} {total_h:.0f}">'
+                y = 0.0
+                for content, h in zip(inner_contents, heights):
+                    combined += f'<g transform="translate(0,{y:.0f})">{content}</g>'
+                    y += h
+                combined += "</svg>"
+                svg_bytes = combined.encode("utf-8")
+
+            print(f"[score] SVG generated: {len(svg_bytes)} bytes")
         except Exception as e:
             print(f"[score] verovio failed: {e}")
 

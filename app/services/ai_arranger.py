@@ -72,23 +72,23 @@ def _build_quick_prompt(notes_data: dict, instruments: list[str], references: st
         name_en = INSTRUMENT_MAP.get(name_kr, name_kr)
         instrument_list.append({"korean": name_kr, "english": name_en, "count": count})
 
-    references_section = f"\n## Song Research & References\n{references}\n" if references else ""
     target_en = INSTRUMENT_MAP.get(target_instrument, target_instrument) if target_instrument else ""
-    target_section = f"\n## Score Output Target\nOnly output notes for **{target_instrument} ({target_en})**. Arrange the full ensemble mentally, but include ONLY this instrument's part in the JSON output.\n" if target_instrument else ""
+    target_section = f"Output notes for **{target_instrument} ({target_en})** only.\n" if target_instrument else ""
 
     total_dur = notes_data.get('total_duration', 60)
     target_notes = max(150, int(total_dur / 60 * 250))
 
-    return f"""You are a music transcription and arrangement specialist. Your job is to FAITHFULLY adapt the original song's melody to the target instrument — do NOT invent new music.
+    ref_block = f"""## Web Reference (authoritative — use key/tempo/chords from here)
+{references}
+→ Extract the key signature, exact tempo (BPM), time signature, and chord progression from above.
+  Use them as the primary musical parameters. Do NOT guess these from the raw notes alone.
+""" if references else ""
 
-{references_section}{target_section}
-## Original Song Data
-- Total duration: {total_dur:.1f} seconds
-- Pitch range: {notes_data.get('pitch_range', {})}
-- Reference song info (use this to understand structure, key, and tempo):
-  Already included above.
-
-## Extracted Notes from Audio (evenly sampled across full song)
+    return f"""You are a professional music arranger. Transcribe and adapt the original song faithfully.
+{target_section}
+{ref_block}
+## Extracted Audio Notes ({len(notes_sample)} samples, evenly distributed across full song)
+Total duration: {total_dur:.1f} seconds
 ```json
 {json.dumps(notes_sample, indent=2)}
 ```
@@ -98,30 +98,26 @@ def _build_quick_prompt(notes_data: dict, instruments: list[str], references: st
 {json.dumps(instrument_list, indent=2)}
 ```
 
-## Instructions (follow strictly)
+## Rules
+1. **Key/tempo/time signature**: take from web reference above if available; otherwise estimate from notes.
+2. **Melody**: follow the pitch contour of the extracted notes. Do not invent unrelated melodies.
+3. **Instrument range**: transpose octaves as needed, keep intervals intact.
+4. **Durations**: use ONLY these values — 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 (quarter lengths).
+5. **Full song coverage**: onset values MUST span 0 → {total_dur:.0f}s. Last note onset near {total_dur:.0f}s.
+6. **Note count**: approximately {target_notes} notes.
 
-1. **Follow the original melody** — the extracted notes above ARE the song. Use their pitch contour and rhythm as your primary source. Do not invent notes that aren't suggested by the data.
-2. **Adapt to the instrument's range** — transpose octaves if needed to fit within the instrument's playable range, but keep the same intervals.
-3. **Use only standard durations** — duration values must be one of: 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 (quarter lengths). Never use values like 0.1, 0.125, 0.0625.
-4. **Cover the full song** — onset values must be spread from 0 to {total_dur:.0f}s. The last note onset should be close to {total_dur:.0f}s. Do NOT cluster everything at the beginning.
-5. **Note count** — generate approximately {target_notes} notes total.
-
-## Output Format (STRICT JSON — no other text)
+## Output (STRICT JSON only — no other text)
 {{
-  "tempo": 120,
+  "tempo": <bpm>,
   "time_signature": "4/4",
   "instruments": {{
     "<instrument_english_name>": {{
       "role": "lead",
-      "notes": [
-        {{"pitch": 60, "onset": 0.0, "duration": 0.5, "velocity": 85}},
-        ...
-      ]
+      "notes": [{{"pitch": 60, "onset": 0.0, "duration": 0.5, "velocity": 85}}, ...]
     }}
   }}
 }}
-
-Pitch is MIDI number (0-127). onset is time in seconds from song start."""
+pitch = MIDI (0-127), onset = seconds from start."""
 
 
 def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references: str = "", target_instrument: str = "") -> str:
@@ -156,19 +152,22 @@ def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references
             stem_end = max((n.get("onset", 0) + n.get("duration", 0)) for n in notes)
             total_duration = max(total_duration, stem_end)
 
-    references_section = f"\n## Song Research & References\n{references}\n" if references else ""
     target_en = INSTRUMENT_MAP.get(target_instrument, target_instrument) if target_instrument else ""
-    target_section = f"\n## Score Output Target\nOnly output notes for **{target_instrument} ({target_en})**. Arrange the full ensemble mentally, but include ONLY this instrument's part in the JSON output.\n" if target_instrument else ""
-
+    target_section = f"Output notes for **{target_instrument} ({target_en})** only.\n" if target_instrument else ""
     target_notes = max(150, int(total_duration / 60 * 250))
 
-    return f"""You are a music transcription and arrangement specialist. Your job is to FAITHFULLY adapt the original song's melody to the target instrument — do NOT invent new music.
+    ref_block = f"""## Web Reference (authoritative — use key/tempo/chords from here)
+{references}
+→ Extract the key signature, exact tempo (BPM), time signature, and chord progression from above.
+  Use them as the primary musical parameters.
+""" if references else ""
 
-{references_section}{target_section}
-## Original Song Data
-- Total duration: {total_duration:.1f} seconds
-- Stem analysis (vocals = main melody, bass = bass line, drums = rhythm reference):
-
+    return f"""You are a professional music arranger. Transcribe and adapt the original song faithfully.
+{target_section}
+{ref_block}
+## Stem Analysis (original audio separated into parts)
+Total duration: {total_duration:.1f} seconds
+Vocals stem = main melody. Bass stem = bass line. Use these as the melodic source.
 ```json
 {json.dumps(stems_summary, indent=2)}
 ```
@@ -178,30 +177,26 @@ def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references
 {json.dumps(instrument_list, indent=2)}
 ```
 
-## Instructions (follow strictly)
+## Rules
+1. **Key/tempo/time signature**: take from web reference if available; otherwise estimate from stems.
+2. **Melody**: follow pitch contour of the vocals stem. Do not invent unrelated melodies.
+3. **Instrument range**: transpose octaves as needed, keep intervals intact.
+4. **Durations**: use ONLY — 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 (quarter lengths).
+5. **Full song coverage**: onset values MUST span 0 → {total_duration:.0f}s. Last note near {total_duration:.0f}s.
+6. **Note count**: approximately {target_notes} notes.
 
-1. **Follow the original melody** — extract the melody from the vocals stem (or most prominent pitched stem). Use those exact pitches and rhythms as your primary source. Do not invent notes.
-2. **Adapt to the instrument's range** — transpose octaves if needed, but keep the same intervals and melodic contour.
-3. **Use only standard durations** — duration values must be one of: 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 (quarter lengths). Never use 0.1, 0.125, 0.0625, or other non-standard values.
-4. **Cover the full song** — onset values must span from 0 to {total_duration:.0f}s. The last note onset must be close to {total_duration:.0f}s. Do NOT cluster everything at the beginning.
-5. **Note count** — generate approximately {target_notes} notes total.
-
-## Output Format (STRICT JSON — no other text)
+## Output (STRICT JSON only — no other text)
 {{
-  "tempo": 120,
+  "tempo": <bpm>,
   "time_signature": "4/4",
   "instruments": {{
     "<instrument_english_name>": {{
       "role": "lead",
-      "notes": [
-        {{"pitch": 60, "onset": 0.0, "duration": 0.5, "velocity": 85}},
-        ...
-      ]
+      "notes": [{{"pitch": 60, "onset": 0.0, "duration": 0.5, "velocity": 85}}, ...]
     }}
   }}
 }}
-
-Pitch is MIDI number (0-127). onset is time in seconds from song start."""
+pitch = MIDI (0-127), onset = seconds from start."""
 
 
 async def _call_openrouter(prompt: str, model: str) -> dict:
