@@ -37,14 +37,16 @@ async def extract_notes_basic_pitch(audio_path: str) -> dict:
 
 
 async def separate_stems_demucs(audio_path: str) -> dict:
-    """Thorough 모드: Demucs로 스템 분리"""
+    """Thorough 모드: Demucs로 스템 분리 (메모리 최적화)"""
     output_dir = tempfile.mkdtemp()
 
-    # demucs CLI 실행 (subprocess)
+    # demucs CLI 실행 — segment=10 으로 메모리 대폭 절약
     cmd = [
         "python", "-m", "demucs",
         "--out", output_dir,
-        "--mp3",  # mp3 출력 (용량 절약)
+        "--mp3",
+        "--segment", "10",   # 10초 단위로 처리 (기본 40 → 메모리 ~1/4)
+        "--overlap", "0.1",  # 세그먼트 겹침 비율
         audio_path
     ]
 
@@ -61,14 +63,18 @@ async def separate_stems_demucs(audio_path: str) -> dict:
         raise RuntimeError("Demucs 스템 분리 시간 초과 (10분)")
 
     if proc.returncode != 0:
-        err_msg = stderr.decode()[-300:] if stderr else "unknown error"
-        print(f"[demucs] FAILED (exit {proc.returncode}): {err_msg}")
-        raise RuntimeError(f"Demucs 스템 분리 실패: {err_msg[:100]}")
+        err_text = stderr.decode()[-500:] if stderr else ""
+        # exit -9 = SIGKILL = OOM
+        if proc.returncode == -9:
+            reason = "서버 메모리 부족 (OOM)"
+        else:
+            reason = err_text[-150:] if err_text else "알 수 없는 오류"
+        print(f"[demucs] FAILED (exit {proc.returncode}): {err_text}")
+        raise RuntimeError(f"Demucs 스템 분리 실패 (exit {proc.returncode}): {reason}")
 
     # 출력 파일 찾기 (demucs는 출력 디렉토리 구조: output_dir/htdemucs/{track_name}/{stem}.mp3)
     stem_files = {}
     for stem in ["drums", "bass", "vocals", "other"]:
-        # 재귀적으로 파일 찾기
         for path in Path(output_dir).rglob(f"{stem}.mp3"):
             stem_files[stem] = str(path)
             break
