@@ -29,8 +29,8 @@ def _build_music21_score(arrangement_data: dict, instrument_en: str):
     part.insert(0, tempo.MetronomeMark(number=bpm))
     part.insert(0, meter.TimeSignature(ts_str))
 
-    # 표준 음표 길이 (MusicXML로 표현 가능한 값만)
-    VALID_QL = [0.0625, 0.125, 0.25, 0.375, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0]
+    # 실용적인 음표 길이만 허용 (8분음표 이상, 64분/32분 제거)
+    VALID_QL = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0]
 
     def snap_ql(ql: float) -> float:
         return min(VALID_QL, key=lambda x: abs(x - ql))
@@ -39,16 +39,16 @@ def _build_music21_score(arrangement_data: dict, instrument_en: str):
     if not notes:
         part.append(note.Note("C4", quarterLength=1.0))
     else:
+        # onset을 8분음표(0.5QL) 그리드에 스냅 — 쉼표가 잘게 쪼개지는 것 방지
         for note_data in sorted(notes, key=lambda x: x.get("onset", 0)):
             pitch_midi = int(note_data.get("pitch", 60))
             duration_sec = float(note_data.get("duration", 0.5))
             onset_sec = float(note_data.get("onset", 0))
             velocity = int(note_data.get("velocity", 80))
             raw_ql = duration_sec * (bpm / 60)
-            quarter_length = snap_ql(max(0.0625, raw_ql))
-            # onset도 16분음표(0.25QL) 그리드에 스냅 → 쉼표 duration이 표현 불가한 값이 되는 것 방지
+            quarter_length = snap_ql(max(0.25, raw_ql))
             raw_offset = onset_sec * (bpm / 60)
-            offset_ql = round(raw_offset / 0.25) * 0.25
+            offset_ql = round(raw_offset / 0.5) * 0.5  # 8분음표 그리드
             try:
                 n = note.Note(_midi_to_note_name(pitch_midi), quarterLength=quarter_length)
                 n.volume.velocity = velocity

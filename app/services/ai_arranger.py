@@ -76,58 +76,52 @@ def _build_quick_prompt(notes_data: dict, instruments: list[str], references: st
     target_en = INSTRUMENT_MAP.get(target_instrument, target_instrument) if target_instrument else ""
     target_section = f"\n## Score Output Target\nOnly output notes for **{target_instrument} ({target_en})**. Arrange the full ensemble mentally, but include ONLY this instrument's part in the JSON output.\n" if target_instrument else ""
 
-    return f"""You are a professional ensemble arranger. Analyze the original audio and create a natural arrangement where each instrument plays a musically appropriate role.
+    total_dur = notes_data.get('total_duration', 60)
+    target_notes = max(150, int(total_dur / 60 * 250))
+
+    return f"""You are a music transcription and arrangement specialist. Your job is to FAITHFULLY adapt the original song's melody to the target instrument — do NOT invent new music.
 
 {references_section}{target_section}
-## Original Audio Notes (sample)
+## Original Song Data
+- Total duration: {total_dur:.1f} seconds
+- Pitch range: {notes_data.get('pitch_range', {})}
+- Reference song info (use this to understand structure, key, and tempo):
+  Already included above.
+
+## Extracted Notes from Audio (evenly sampled across full song)
 ```json
 {json.dumps(notes_sample, indent=2)}
 ```
-Pitch range: {notes_data.get('pitch_range', {})}
-Total duration: {notes_data.get('total_duration', 0):.1f} seconds
 
-## Available Instruments
+## Target Instrument
 ```json
 {json.dumps(instrument_list, indent=2)}
 ```
 
-## Your Task
+## Instructions (follow strictly)
 
-**Step 1 — Analyze the original:**
-Listen to the note data. Identify the main melodic line (the notes a listener would hum) and the overall character of the song (genre, mood, tempo feel).
+1. **Follow the original melody** — the extracted notes above ARE the song. Use their pitch contour and rhythm as your primary source. Do not invent notes that aren't suggested by the data.
+2. **Adapt to the instrument's range** — transpose octaves if needed to fit within the instrument's playable range, but keep the same intervals.
+3. **Use only standard durations** — duration values must be one of: 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 (quarter lengths). Never use values like 0.1, 0.125, 0.0625.
+4. **Cover the full song** — onset values must be spread from 0 to {total_dur:.0f}s. The last note onset should be close to {total_dur:.0f}s. Do NOT cluster everything at the beginning.
+5. **Note count** — generate approximately {target_notes} notes total.
 
-**Step 2 — Assign roles based on musical fit:**
-From the available instruments, choose the one that best fits the melody role given the song's character and the instrument's range/timbre. If the original song's lead instrument (e.g., guitar solo) is not in the list, pick the next most suitable instrument for melody.
-
-Role options:
-- **lead**: Carries the main melody — exactly ONE instrument gets this role
-- **harmony**: Sustained chords or chord tones that fill the texture
-- **counter-melody**: Secondary melodic line that weaves around the lead without clashing
-- **bass**: Root-note movement following the chord changes
-- **rhythm**: Rhythmic pulse or textural support
-
-**Step 3 — Write the parts:**
-- Lead instrument: use the actual melodic notes from the audio (velocity 85-100)
-- Supporting instruments: complement the lead, never double it note-for-note (velocity 45-70)
-- All parts should feel incomplete without each other
-
-## Output Format (STRICT JSON)
-Return ONLY valid JSON, no other text:
+## Output Format (STRICT JSON — no other text)
 {{
   "tempo": 120,
   "time_signature": "4/4",
   "instruments": {{
     "<instrument_english_name>": {{
-      "role": "lead|harmony|counter-melody|bass|rhythm",
+      "role": "lead",
       "notes": [
-        {{"pitch": 60, "onset": 0.0, "duration": 0.5, "velocity": 80}},
+        {{"pitch": 60, "onset": 0.0, "duration": 0.5, "velocity": 85}},
         ...
       ]
     }}
   }}
 }}
 
-The song is {notes_data.get('total_duration', 0):.1f} seconds long. Generate approximately {max(150, int(notes_data.get('total_duration', 60) / 60 * 250))} notes spread across the FULL duration — onset values must reach close to {notes_data.get('total_duration', 0):.1f}s (intro → verse → chorus → bridge → outro). Do NOT cluster notes only at the beginning. Pitch is MIDI number (0-127)."""
+Pitch is MIDI number (0-127). onset is time in seconds from song start."""
 
 
 def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references: str = "", target_instrument: str = "") -> str:
@@ -166,59 +160,48 @@ def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references
     target_en = INSTRUMENT_MAP.get(target_instrument, target_instrument) if target_instrument else ""
     target_section = f"\n## Score Output Target\nOnly output notes for **{target_instrument} ({target_en})**. Arrange the full ensemble mentally, but include ONLY this instrument's part in the JSON output.\n" if target_instrument else ""
 
-    return f"""You are a professional orchestral arranger with expertise in voice leading and orchestration.
-Analyze the original audio stems and create a natural ensemble arrangement — each instrument plays a distinct, musically appropriate role.
+    target_notes = max(150, int(total_duration / 60 * 250))
+
+    return f"""You are a music transcription and arrangement specialist. Your job is to FAITHFULLY adapt the original song's melody to the target instrument — do NOT invent new music.
+
 {references_section}{target_section}
-## Stem Analysis (original audio broken into parts)
+## Original Song Data
+- Total duration: {total_duration:.1f} seconds
+- Stem analysis (vocals = main melody, bass = bass line, drums = rhythm reference):
+
 ```json
 {json.dumps(stems_summary, indent=2)}
 ```
 
-## Available Instruments
+## Target Instrument
 ```json
 {json.dumps(instrument_list, indent=2)}
 ```
 
-## Your Task
+## Instructions (follow strictly)
 
-**Step 1 — Analyze the stems:**
-- Identify the main melody from the stems (usually in vocals or the most prominent pitched stem)
-- Understand the harmonic structure, chord progressions, and bass movement
-- Note the song's character: genre, mood, energy level
+1. **Follow the original melody** — extract the melody from the vocals stem (or most prominent pitched stem). Use those exact pitches and rhythms as your primary source. Do not invent notes.
+2. **Adapt to the instrument's range** — transpose octaves if needed, but keep the same intervals and melodic contour.
+3. **Use only standard durations** — duration values must be one of: 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 (quarter lengths). Never use 0.1, 0.125, 0.0625, or other non-standard values.
+4. **Cover the full song** — onset values must span from 0 to {total_duration:.0f}s. The last note onset must be close to {total_duration:.0f}s. Do NOT cluster everything at the beginning.
+5. **Note count** — generate approximately {target_notes} notes total.
 
-**Step 2 — Assign roles based on musical analysis:**
-Choose the ONE instrument from the list that best suits carrying the melody (considering range, timbre, and the song's style). If the original lead instrument isn't available, pick the closest fit. Assign remaining instruments to supporting roles.
-
-Role options:
-- **lead**: Main melody — exactly ONE instrument
-- **harmony**: Chord tones and harmonic support
-- **counter-melody**: Secondary melodic line that complements the lead
-- **bass**: Low-end foundation following chord roots
-- **rhythm**: Rhythmic pulse or sustained texture
-
-**Step 3 — Write idiomatic parts:**
-- Lead: exact melody notes from the vocals/lead stem (velocity 85-100)
-- Supporting: complement the lead using proper voice leading, never doubling it (velocity 45-70)
-- Each part should feel natural to play on that instrument
-
-## Output Format (STRICT JSON)
-Return ONLY valid JSON, no other text:
+## Output Format (STRICT JSON — no other text)
 {{
   "tempo": 120,
   "time_signature": "4/4",
-  "key": "C major",
   "instruments": {{
     "<instrument_english_name>": {{
-      "role": "lead|harmony|counter-melody|bass|rhythm",
+      "role": "lead",
       "notes": [
-        {{"pitch": 60, "onset": 0.0, "duration": 0.5, "velocity": 80}},
+        {{"pitch": 60, "onset": 0.0, "duration": 0.5, "velocity": 85}},
         ...
       ]
     }}
   }}
 }}
 
-The song is {total_duration:.1f} seconds long. Generate approximately {max(150, int(total_duration / 60 * 250))} notes spread across the FULL duration — onset values must reach close to {total_duration:.1f}s (intro → verse → chorus → bridge → outro). Do NOT cluster notes only at the beginning. Pitch is MIDI number (0-127)."""
+Pitch is MIDI number (0-127). onset is time in seconds from song start."""
 
 
 async def _call_openrouter(prompt: str, model: str) -> dict:
