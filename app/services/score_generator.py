@@ -46,7 +46,9 @@ def _build_music21_score(arrangement_data: dict, instrument_en: str):
             velocity = int(note_data.get("velocity", 80))
             raw_ql = duration_sec * (bpm / 60)
             quarter_length = snap_ql(max(0.0625, raw_ql))
-            offset_ql = onset_sec * (bpm / 60)
+            # onset도 16분음표(0.25QL) 그리드에 스냅 → 쉼표 duration이 표현 불가한 값이 되는 것 방지
+            raw_offset = onset_sec * (bpm / 60)
+            offset_ql = round(raw_offset / 0.25) * 0.25
             try:
                 n = note.Note(_midi_to_note_name(pitch_midi), quarterLength=quarter_length)
                 n.volume.velocity = velocity
@@ -62,8 +64,9 @@ async def generate_score(arrangement_data: dict, instrument_en: str) -> tuple[by
     score = _build_music21_score(arrangement_data, instrument_en)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        # MusicXML 생성
+        # MusicXML 생성 — makeNotation()으로 쉼표/마디 duration 정규화
         xml_path = os.path.join(tmp_dir, "score.xml")
+        score.makeNotation(inPlace=True)
         score.write("musicxml", fp=xml_path)
         xml_bytes = Path(xml_path).read_bytes()
 
