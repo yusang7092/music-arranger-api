@@ -11,6 +11,23 @@ def _midi_to_note_name(midi_pitch: int) -> str:
     return f"{note}{octave}"
 
 
+def _split_into_valid_durations(ql: float) -> list:
+    """큰 duration을 표현 가능한 음표 값들로 분해 (긴 쉼표 채울 때 사용)"""
+    VALID_QL = [4.0, 3.0, 2.0, 1.5, 1.0, 0.75, 0.5, 0.25]
+    result = []
+    remaining = round(ql * 4) / 4  # 16분음표 단위로 반올림
+    while remaining >= 0.25:
+        for v in VALID_QL:
+            if v <= remaining + 0.01:
+                result.append(v)
+                remaining -= v
+                remaining = round(remaining * 4) / 4
+                break
+        else:
+            break
+    return result if result else [0.25]
+
+
 def _build_music21_score(arrangement_data: dict, instrument_en: str):
     from music21 import stream, note, instrument as m21instrument, tempo, meter
 
@@ -22,39 +39,65 @@ def _build_music21_score(arrangement_data: dict, instrument_en: str):
     except Exception:
         inst_obj = m21instrument.Instrument()
         inst_obj.instrumentName = instrument_en
-    part.insert(0, inst_obj)
+    part.append(inst_obj)
 
     bpm = arrangement_data.get("tempo", 120)
     ts_str = arrangement_data.get("time_signature", "4/4")
-    part.insert(0, tempo.MetronomeMark(number=bpm))
-    part.insert(0, meter.TimeSignature(ts_str))
+    part.append(tempo.MetronomeMark(number=bpm))
+    part.append(meter.TimeSignature(ts_str))
 
-    # 실용적인 음표 길이만 허용 (8분음표 이상, 64분/32분 제거)
-    VALID_QL = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0]
+    # 표준 음표 길이 (MusicXML 표현 가능)
+    VALID_QL = [4.0, 3.0, 2.0, 1.5, 1.0, 0.75, 0.5, 0.25]
 
     def snap_ql(ql: float) -> float:
         return min(VALID_QL, key=lambda x: abs(x - ql))
 
-    notes = arrangement_data.get("notes", [])
-    if not notes:
+    raw_notes = arrangement_data.get("notes", [])
+    total_duration_sec = arrangement_data.get("total_duration", 0.0)
+    total_ql = round(total_duration_sec * (bpm / 60) * 4) / 4  # 전체 곡 길이 (QL)
+
+    if not raw_notes:
         part.append(note.Note("C4", quarterLength=1.0))
     else:
-        # onset을 8분음표(0.5QL) 그리드에 스냅 — 쉼표가 잘게 쪼개지는 것 방지
-        for note_data in sorted(notes, key=lambda x: x.get("onset", 0)):
+        current_ql = 0.0  # 현재 위치 (quarter length)
+
+        for note_data in sorted(raw_notes, key=lambda x: x.get("onset", 0)):
             pitch_midi = int(note_data.get("pitch", 60))
             duration_sec = float(note_data.get("duration", 0.5))
             onset_sec = float(note_data.get("onset", 0))
             velocity = int(note_data.get("velocity", 80))
+
+            # onset을 8분음표 그리드에 스냅
+            raw_offset = onset_sec * (bpm / 60)
+            offset_ql = round(raw_offset / 0.5) * 0.5
+
+            # 현재 위치보다 앞이면 스킵 (겹침 방지)
+            if offset_ql < current_ql:
+                offset_ql = current_ql
+
+            # 현재 위치와 onset 사이 갭 → 쉼표로 채움
+            gap = round((offset_ql - current_ql) * 4) / 4
+            if gap >= 0.25:
+                for rest_ql in _split_into_valid_durations(gap):
+                    part.append(note.Rest(quarterLength=rest_ql))
+
+            # 음표 추가
             raw_ql = duration_sec * (bpm / 60)
             quarter_length = snap_ql(max(0.25, raw_ql))
-            raw_offset = onset_sec * (bpm / 60)
-            offset_ql = round(raw_offset / 0.5) * 0.5  # 8분음표 그리드
             try:
                 n = note.Note(_midi_to_note_name(pitch_midi), quarterLength=quarter_length)
                 n.volume.velocity = velocity
-                part.insert(offset_ql, n)
+                part.append(n)
+                current_ql = offset_ql + quarter_length
             except Exception:
+                current_ql = offset_ql
                 continue
+
+        # 마지막 음표 이후 ~ 곡 끝까지 쉼표로 채워 전체 길이 보장
+        if total_ql > current_ql + 0.25:
+            remaining = round((total_ql - current_ql) * 4) / 4
+            for rest_ql in _split_into_valid_durations(remaining):
+                part.append(note.Rest(quarterLength=rest_ql))
 
     score.append(part)
     return score
@@ -64,9 +107,9 @@ async def generate_score(arrangement_data: dict, instrument_en: str) -> tuple[by
     score = _build_music21_score(arrangement_data, instrument_en)
 
     with tempfile.TemporaryDirectory() as tmp_dir:
-        # MusicXML 생성 — makeNotation()으로 쉼표/마디 duration 정규화
+        # MusicXML 생성 — makeMeasures로 마디 구성 (makeNotation은 뒤 쉼표를 잘라냄)
         xml_path = os.path.join(tmp_dir, "score.xml")
-        score.makeNotation(inPlace=True)
+        score.makeMeasures(inPlace=True)
         score.write("musicxml", fp=xml_path)
         xml_bytes = Path(xml_path).read_bytes()
 

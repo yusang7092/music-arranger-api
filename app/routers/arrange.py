@@ -90,10 +90,16 @@ async def _process_arrangement(
                         inst_arrangement = val
                         break
 
+            notes_list = inst_arrangement.get("notes", []) if isinstance(inst_arrangement, dict) else []
+            # 전체 곡 길이: notes의 최대 onset+duration
+            total_dur = arrangement.get("total_duration", 0.0)
+            if not total_dur and notes_list:
+                total_dur = max(n.get("onset", 0) + n.get("duration", 0) for n in notes_list)
             arrangement_for_gen = {
                 "tempo": arrangement.get("tempo", 120),
                 "time_signature": arrangement.get("time_signature", "4/4"),
-                "notes": inst_arrangement.get("notes", []) if isinstance(inst_arrangement, dict) else []
+                "notes": notes_list,
+                "total_duration": total_dur,
             }
 
             pdf_bytes, png_bytes = await score_generator.generate_score(
