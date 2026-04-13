@@ -162,7 +162,7 @@ async def generate_score(arrangement_data: dict, instrument_en: str) -> tuple[by
                 W = 2100
                 for svg in page_svgs:
                     m = _re.search(r'height="([^"]+)"', svg)
-                    h = float(m.group(1)) if m else 3000
+                    h = float(m.group(1).replace('px', '').strip()) if m else 3000
                     # 루트 <svg> 태그를 <g translate>로 교체
                     inner = _re.sub(r'<\?xml[^>]*\?>\s*', '', svg)
                     inner = _re.sub(r'<svg[^>]*>', f'<g transform="translate(0,{total_h:.0f})">', inner, count=1)
