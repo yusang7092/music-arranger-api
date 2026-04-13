@@ -90,10 +90,10 @@ async def _process_arrangement(
             )
             arrangement["total_duration"] = notes_data.get("total_duration", 0.0)
         else:  # thorough
-            _set_progress(arrangement_id, 5, "스템 분리 중 (보컬·악기 분리)")
+            _set_progress(arrangement_id, 5, "스템 분리 중 (보컬·악기 분리) — CPU 서버에서 5~10분 소요")
             stems_data = await _run_with_ticker(
                 audio_processor.separate_stems_demucs(file_path),
-                arrangement_id, 5, 30, "스템 분리 중 (보컬·악기 분리)", 180.0
+                arrangement_id, 5, 30, "스템 분리 중 (보컬·악기 분리)", 600.0
             )
             _set_progress(arrangement_id, 30, "각 파트 음표 추출 중")
             stems_notes = await _run_with_ticker(

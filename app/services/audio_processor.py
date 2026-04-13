@@ -53,7 +53,12 @@ async def separate_stems_demucs(audio_path: str) -> dict:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE
     )
-    stdout, stderr = await proc.communicate()
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)  # 10분 타임아웃
+    except asyncio.TimeoutError:
+        proc.kill()
+        print("[demucs] TIMEOUT after 600s")
+        raise RuntimeError("Demucs 스템 분리 시간 초과 (10분)")
 
     if proc.returncode != 0:
         err_msg = stderr.decode()[-300:] if stderr else "unknown error"
