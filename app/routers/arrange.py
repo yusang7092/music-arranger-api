@@ -76,7 +76,8 @@ async def _process_arrangement(
     try:
 
         # 2. 음표 추출 / 스템 분리
-        original_filename = request.original_filename or ""
+        # 사용자가 입력한 곡 제목 우선, 없으면 파일명 fallback
+        search_name = request.song_title or request.original_filename or ""
         if request.mode == "quick":
             _set_progress(arrangement_id, 5, "음원에서 음표 추출 중")
             notes_data = await _run_with_ticker(
@@ -85,7 +86,7 @@ async def _process_arrangement(
             )
             _set_progress(arrangement_id, 30, "레퍼런스 검색 + AI 편곡 중")
             arrangement = await _run_with_ticker(
-                ai_arranger.arrange_quick(notes_data, request.instruments, original_filename, request.target_instrument),
+                ai_arranger.arrange_quick(notes_data, request.instruments, search_name, request.target_instrument),
                 arrangement_id, 30, 65, "AI 편곡 중", 150.0
             )
             arrangement["total_duration"] = notes_data.get("total_duration", 0.0)
@@ -102,7 +103,7 @@ async def _process_arrangement(
             )
             _set_progress(arrangement_id, 45, "레퍼런스 검색 + AI 편곡 중")
             arrangement = await _run_with_ticker(
-                ai_arranger.arrange_thorough(stems_notes, request.instruments, original_filename, request.target_instrument),
+                ai_arranger.arrange_thorough(stems_notes, request.instruments, search_name, request.target_instrument),
                 arrangement_id, 45, 65, "AI 편곡 중", 180.0
             )
             # 스템 중 가장 긴 것을 기준으로 곡 길이 주입
@@ -235,6 +236,7 @@ async def start_arrangement(
     mode: str = Form("quick"),
     original_filename: str = Form(""),
     target_instrument: str = Form(""),
+    song_title: str = Form(""),
 ):
     """
     Upload an audio file and start the arrangement pipeline.
@@ -280,6 +282,7 @@ async def start_arrangement(
         mode=mode,
         original_filename=original_filename,
         target_instrument=target_instrument,
+        song_title=song_title,
     )
     background_tasks.add_task(_process_arrangement, arrangement_id, tmp_path, request)
 

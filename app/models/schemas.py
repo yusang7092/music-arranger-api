@@ -8,6 +8,7 @@ class ArrangeRequest(BaseModel):
     mode: str               # "quick" | "thorough"
     original_filename: str = ""
     target_instrument: str = ""  # 악보를 받을 악기 (한글)
+    song_title: str = ""  # 사용자가 직접 입력한 곡 제목 (레퍼런스 검색용)
 
 
 class ScoreResult(BaseModel):
