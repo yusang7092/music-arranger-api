@@ -78,10 +78,10 @@ def _build_quick_prompt(notes_data: dict, instruments: list[str], references: st
     total_dur = notes_data.get('total_duration', 60)
     target_notes = max(150, int(total_dur / 60 * 250))
 
-    ref_block = f"""## Web Reference (authoritative — use key/tempo/chords from here)
+    ref_block = f"""## Song Reference (from web search)
 {references}
-→ Extract the key signature, exact tempo (BPM), time signature, and chord progression from above.
-  Use them as the primary musical parameters. Do NOT guess these from the raw notes alone.
+→ Use this alongside your own musical judgment. Let it inform the key, tempo, and chord feel,
+  but trust your ears on the extracted notes too — blend both sources.
 """ if references else ""
 
     return f"""You are a professional music arranger. Transcribe and adapt the original song faithfully.
@@ -99,7 +99,7 @@ Total duration: {total_dur:.1f} seconds
 ```
 
 ## Rules
-1. **Key/tempo/time signature**: take from web reference above if available; otherwise estimate from notes.
+1. **Key/tempo/time signature**: blend web reference with your analysis of the extracted notes.
 2. **Melody**: follow the pitch contour of the extracted notes. Do not invent unrelated melodies.
 3. **Instrument range**: transpose octaves as needed, keep intervals intact.
 4. **Durations**: use ONLY these values — 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 (quarter lengths).
@@ -156,10 +156,10 @@ def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references
     target_section = f"Output notes for **{target_instrument} ({target_en})** only.\n" if target_instrument else ""
     target_notes = max(150, int(total_duration / 60 * 250))
 
-    ref_block = f"""## Web Reference (authoritative — use key/tempo/chords from here)
+    ref_block = f"""## Song Reference (from web search)
 {references}
-→ Extract the key signature, exact tempo (BPM), time signature, and chord progression from above.
-  Use them as the primary musical parameters.
+→ Use this alongside your own musical judgment. Let it inform the key, tempo, and chord feel,
+  but trust your ears on the extracted notes too — blend both sources.
 """ if references else ""
 
     return f"""You are a professional music arranger. Transcribe and adapt the original song faithfully.
@@ -178,7 +178,7 @@ Vocals stem = main melody. Bass stem = bass line. Use these as the melodic sourc
 ```
 
 ## Rules
-1. **Key/tempo/time signature**: take from web reference if available; otherwise estimate from stems.
+1. **Key/tempo/time signature**: blend web reference with your analysis of the stems.
 2. **Melody**: follow pitch contour of the vocals stem. Do not invent unrelated melodies.
 3. **Instrument range**: transpose octaves as needed, keep intervals intact.
 4. **Durations**: use ONLY — 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 (quarter lengths).
