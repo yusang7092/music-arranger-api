@@ -80,8 +80,9 @@ def _build_quick_prompt(notes_data: dict, instruments: list[str], references: st
 
     ref_block = f"""## Song Reference (from web search)
 {references}
-→ Use this alongside your own musical judgment. Let it inform the key, tempo, and chord feel,
-  but trust your ears on the extracted notes too — blend both sources.
+→ Lean on this reference: use its key, tempo, time signature, and chord progressions as your
+  starting point. Cross-check against the extracted notes and adjust only where the audio clearly
+  disagrees with the reference.
 """ if references else ""
 
     return f"""You are a professional music arranger. Transcribe and adapt the original song faithfully.
@@ -99,7 +100,7 @@ Total duration: {total_dur:.1f} seconds
 ```
 
 ## Rules
-1. **Key/tempo/time signature**: blend web reference with your analysis of the extracted notes.
+1. **Key/tempo/time signature**: prefer the web reference; only override if the notes strongly contradict it.
 2. **Melody**: follow the pitch contour of the extracted notes. Do not invent unrelated melodies.
 3. **Instrument range**: transpose octaves as needed, keep intervals intact.
 4. **Durations**: use ONLY these values — 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 (quarter lengths).
@@ -158,8 +159,9 @@ def _build_thorough_prompt(stems_notes: dict, instruments: list[str], references
 
     ref_block = f"""## Song Reference (from web search)
 {references}
-→ Use this alongside your own musical judgment. Let it inform the key, tempo, and chord feel,
-  but trust your ears on the extracted notes too — blend both sources.
+→ Lean on this reference: use its key, tempo, time signature, and chord progressions as your
+  starting point. Cross-check against the extracted notes and adjust only where the audio clearly
+  disagrees with the reference.
 """ if references else ""
 
     return f"""You are a professional music arranger. Transcribe and adapt the original song faithfully.
@@ -178,7 +180,7 @@ Vocals stem = main melody. Bass stem = bass line. Use these as the melodic sourc
 ```
 
 ## Rules
-1. **Key/tempo/time signature**: blend web reference with your analysis of the stems.
+1. **Key/tempo/time signature**: prefer the web reference; only override if the stems strongly contradict it.
 2. **Melody**: follow pitch contour of the vocals stem. Do not invent unrelated melodies.
 3. **Instrument range**: transpose octaves as needed, keep intervals intact.
 4. **Durations**: use ONLY — 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0 (quarter lengths).

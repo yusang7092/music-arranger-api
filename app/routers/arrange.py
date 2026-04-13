@@ -66,33 +66,32 @@ async def _process_arrangement(
         # 2. 음표 추출 / 스템 분리
         original_filename = request.original_filename or ""
         if request.mode == "quick":
-            _set_progress(arrangement_id, 10, "음원에서 음표 추출 중")
+            _set_progress(arrangement_id, 5, "음원에서 음표 추출 중")
             notes_data = await _run_with_ticker(
                 audio_processor.extract_notes_basic_pitch(file_path),
-                arrangement_id, 10, 38, "음원에서 음표 추출 중", 60.0
+                arrangement_id, 5, 30, "음원에서 음표 추출 중", 60.0
             )
-            _set_progress(arrangement_id, 38, "AI 편곡 중")
+            _set_progress(arrangement_id, 30, "레퍼런스 검색 + AI 편곡 중")
             arrangement = await _run_with_ticker(
                 ai_arranger.arrange_quick(notes_data, request.instruments, original_filename, request.target_instrument),
-                arrangement_id, 38, 68, "AI 편곡 중", 150.0
+                arrangement_id, 30, 65, "AI 편곡 중", 150.0
             )
-            # 실제 곡 길이를 arrangement에 주입 (score_generator가 전체 길이 채울 수 있게)
             arrangement["total_duration"] = notes_data.get("total_duration", 0.0)
         else:  # thorough
-            _set_progress(arrangement_id, 8, "스템 분리 중 (보컬·악기 분리)")
+            _set_progress(arrangement_id, 5, "스템 분리 중 (보컬·악기 분리)")
             stems_data = await _run_with_ticker(
                 audio_processor.separate_stems_demucs(file_path),
-                arrangement_id, 8, 35, "스템 분리 중 (보컬·악기 분리)", 120.0
+                arrangement_id, 5, 30, "스템 분리 중 (보컬·악기 분리)", 180.0
             )
-            _set_progress(arrangement_id, 35, "각 파트 음표 추출 중")
+            _set_progress(arrangement_id, 30, "각 파트 음표 추출 중")
             stems_notes = await _run_with_ticker(
                 audio_processor.extract_notes_from_stems(stems_data),
-                arrangement_id, 35, 55, "각 파트 음표 추출 중", 60.0
+                arrangement_id, 30, 45, "각 파트 음표 추출 중", 60.0
             )
-            _set_progress(arrangement_id, 55, "AI 편곡 중")
+            _set_progress(arrangement_id, 45, "레퍼런스 검색 + AI 편곡 중")
             arrangement = await _run_with_ticker(
                 ai_arranger.arrange_thorough(stems_notes, request.instruments, original_filename, request.target_instrument),
-                arrangement_id, 55, 68, "AI 편곡 중", 180.0
+                arrangement_id, 45, 65, "AI 편곡 중", 180.0
             )
             # 스템 중 가장 긴 것을 기준으로 곡 길이 주입
             if stems_notes:
