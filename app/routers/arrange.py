@@ -52,16 +52,28 @@ async def _process_arrangement(
     request: ArrangeRequest,
 ) -> None:
     import os
-    from app.services import audio_processor, ai_arranger, score_generator
+
+    # 1. 상태 → processing (import 전에 먼저 — import 실패해도 0%에 멈추지 않도록)
+    try:
+        _set_progress(arrangement_id, 1, "시작 중...")
+        supabase.table("arrangements").update(
+            {"status": "processing"}
+        ).eq("id", arrangement_id).execute()
+    except Exception:
+        pass
+
+    try:
+        _set_progress(arrangement_id, 2, "모듈 로딩 중...")
+        from app.services import audio_processor, ai_arranger, score_generator
+        _set_progress(arrangement_id, 3, "준비 완료")
+    except Exception as e:
+        _set_progress(arrangement_id, 0, f"모듈 로드 실패: {str(e)[:80]}")
+        supabase.table("arrangements").update({"status": "error"}).eq("id", arrangement_id).execute()
+        return
 
     n = len(request.instruments) or 1
 
     try:
-        # 1. 상태 → processing
-        _set_progress(arrangement_id, 3, "시작 중...")
-        supabase.table("arrangements").update(
-            {"status": "processing"}
-        ).eq("id", arrangement_id).execute()
 
         # 2. 음표 추출 / 스템 분리
         original_filename = request.original_filename or ""

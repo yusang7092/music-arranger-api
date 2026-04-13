@@ -55,6 +55,11 @@ async def separate_stems_demucs(audio_path: str) -> dict:
     )
     stdout, stderr = await proc.communicate()
 
+    if proc.returncode != 0:
+        err_msg = stderr.decode()[-300:] if stderr else "unknown error"
+        print(f"[demucs] FAILED (exit {proc.returncode}): {err_msg}")
+        raise RuntimeError(f"Demucs 스템 분리 실패: {err_msg[:100]}")
+
     # 출력 파일 찾기 (demucs는 출력 디렉토리 구조: output_dir/htdemucs/{track_name}/{stem}.mp3)
     stem_files = {}
     for stem in ["drums", "bass", "vocals", "other"]:
