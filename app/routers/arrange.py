@@ -1,3 +1,4 @@
+import asyncio
 import json
 from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks, HTTPException
 from app.models.schemas import ArrangeRequest, ArrangeStatus, ScoreResult, ReviseRequest, RevisionStatus
@@ -14,6 +15,35 @@ _progress: dict[str, dict] = {}  # key: arrangement_id, value: {progress, stage}
 
 def _set_progress(arrangement_id: str, progress: int, stage: str) -> None:
     _progress[arrangement_id] = {"progress": progress, "stage": stage}
+
+
+async def _tick_progress(arrangement_id: str, start: int, end: int, stage: str, duration_sec: float):
+    """장시간 작업 중 진행바를 천천히 증가시키는 코루틴. 외부에서 cancel() 호출로 중단."""
+    steps = end - start
+    if steps <= 0 or duration_sec <= 0:
+        return
+    interval = duration_sec / steps
+    for p in range(start + 1, end):
+        await asyncio.sleep(interval)
+        current = _progress.get(arrangement_id, {}).get("progress", 0)
+        if current < p:
+            _set_progress(arrangement_id, p, stage)
+
+
+async def _run_with_ticker(coro, arrangement_id: str, start: int, end: int, stage: str, estimate_sec: float):
+    """coro 실행 중 progress ticker를 병렬로 돌리고, 완료되면 ticker를 취소."""
+    ticker = asyncio.create_task(
+        _tick_progress(arrangement_id, start, end, stage, estimate_sec)
+    )
+    try:
+        result = await coro
+    finally:
+        ticker.cancel()
+        try:
+            await ticker
+        except asyncio.CancelledError:
+            pass
+    return result
 
 
 async def _process_arrangement(
@@ -37,16 +67,31 @@ async def _process_arrangement(
         original_filename = request.original_filename or ""
         if request.mode == "quick":
             _set_progress(arrangement_id, 10, "음원에서 음표 추출 중")
-            notes_data = await audio_processor.extract_notes_basic_pitch(file_path)
-            _set_progress(arrangement_id, 40, "AI 편곡 중")
-            arrangement = await ai_arranger.arrange_quick(notes_data, request.instruments, original_filename, request.target_instrument)
+            notes_data = await _run_with_ticker(
+                audio_processor.extract_notes_basic_pitch(file_path),
+                arrangement_id, 10, 38, "음원에서 음표 추출 중", 60.0
+            )
+            _set_progress(arrangement_id, 38, "AI 편곡 중")
+            arrangement = await _run_with_ticker(
+                ai_arranger.arrange_quick(notes_data, request.instruments, original_filename, request.target_instrument),
+                arrangement_id, 38, 68, "AI 편곡 중", 150.0
+            )
         else:  # thorough
             _set_progress(arrangement_id, 8, "스템 분리 중 (보컬·악기 분리)")
-            stems_data = await audio_processor.separate_stems_demucs(file_path)
-            _set_progress(arrangement_id, 38, "각 파트 음표 추출 중")
-            stems_notes = await audio_processor.extract_notes_from_stems(stems_data)
-            _set_progress(arrangement_id, 58, "AI 편곡 중")
-            arrangement = await ai_arranger.arrange_thorough(stems_notes, request.instruments, original_filename, request.target_instrument)
+            stems_data = await _run_with_ticker(
+                audio_processor.separate_stems_demucs(file_path),
+                arrangement_id, 8, 35, "스템 분리 중 (보컬·악기 분리)", 120.0
+            )
+            _set_progress(arrangement_id, 35, "각 파트 음표 추출 중")
+            stems_notes = await _run_with_ticker(
+                audio_processor.extract_notes_from_stems(stems_data),
+                arrangement_id, 35, 55, "각 파트 음표 추출 중", 60.0
+            )
+            _set_progress(arrangement_id, 55, "AI 편곡 중")
+            arrangement = await _run_with_ticker(
+                ai_arranger.arrange_thorough(stems_notes, request.instruments, original_filename, request.target_instrument),
+                arrangement_id, 55, 68, "AI 편곡 중", 180.0
+            )
 
         _set_progress(arrangement_id, 70, "편곡 완료 — 악보 저장 중")
 
@@ -78,7 +123,9 @@ async def _process_arrangement(
             inst_progress = 70 + int((idx / n_score) * 25)
             inst_spec = next((s for s in request.instruments if s.split("_")[0] == inst_kr), inst_kr)
 
-            _set_progress(arrangement_id, inst_progress, f"{inst_kr} 악보 생성 중 ({idx + 1}/{n_score})")
+            score_start = 70 + int((idx / n_score) * 25)
+            score_end = 70 + int(((idx + 1) / n_score) * 25)
+            _set_progress(arrangement_id, score_start, f"{inst_kr} 악보 생성 중 ({idx + 1}/{n_score})")
 
             from app.services.ai_arranger import INSTRUMENT_MAP
             inst_en = INSTRUMENT_MAP.get(inst_kr, inst_kr)
@@ -91,7 +138,6 @@ async def _process_arrangement(
                         break
 
             notes_list = inst_arrangement.get("notes", []) if isinstance(inst_arrangement, dict) else []
-            # 전체 곡 길이: notes의 최대 onset+duration
             total_dur = arrangement.get("total_duration", 0.0)
             if not total_dur and notes_list:
                 total_dur = max(n.get("onset", 0) + n.get("duration", 0) for n in notes_list)
@@ -102,8 +148,10 @@ async def _process_arrangement(
                 "total_duration": total_dur,
             }
 
-            pdf_bytes, png_bytes = await score_generator.generate_score(
-                arrangement_for_gen, inst_en
+            pdf_bytes, png_bytes = await _run_with_ticker(
+                score_generator.generate_score(arrangement_for_gen, inst_en),
+                arrangement_id, score_start, score_end,
+                f"{inst_kr} 악보 생성 중 ({idx + 1}/{n_score})", 30.0
             )
 
             from app.core.supabase import supabase as sb
