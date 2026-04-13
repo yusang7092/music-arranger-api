@@ -134,47 +134,50 @@ async def generate_score(arrangement_data: dict, instrument_en: str) -> tuple[by
         svg_bytes = b""
         pdf_bytes = b""
 
-        # verovio: MusicXML → SVG 전 페이지 렌더링 후 세로로 합치기
+        # verovio: MusicXML → SVG (adjustPageHeight=True → 단일 긴 페이지로 전곡 출력)
         try:
-            import verovio, re as _re
+            import verovio
             tk = verovio.toolkit()
             tk.setOptions({
                 "pageWidth": 2100,
-                "pageHeight": 2970,   # A4 비율, 페이지 분리 허용
-                "adjustPageHeight": False,
-                "scale": 45,
+                "adjustPageHeight": True,   # 내용 길이에 맞춰 높이 자동 조정 → 전 페이지 한 SVG
+                "scale": 40,
                 "footer": "none",
                 "header": "none",
-                "spacingSystem": 10,
+                "spacingSystem": 8,
+                "spacingStaff": 8,
             })
             tk.loadData(xml_bytes.decode("utf-8"))
             page_count = tk.getPageCount()
             print(f"[score] verovio: {page_count} pages")
 
-            if page_count == 1:
-                svg_bytes = tk.renderToSVG(1).encode("utf-8")
+            # 모든 페이지를 개별 렌더링 후 단순 vertical stack
+            import re as _re
+            page_svgs = [tk.renderToSVG(p) for p in range(1, page_count + 1)]
+            if len(page_svgs) == 1:
+                svg_bytes = page_svgs[0].encode("utf-8")
             else:
-                # 각 페이지 SVG를 세로로 합쳐 하나의 긴 SVG로 만들기
-                pages_svg = [tk.renderToSVG(p) for p in range(1, page_count + 1)]
-                heights = []
-                inner_contents = []
-                page_width = 2100
-                for svg in pages_svg:
-                    vb = _re.search(r'viewBox="[^"]*\s+[^"]*\s+([^\s"]+)\s+([^\s"]+)"', svg)
-                    h = float(vb.group(2)) if vb else 2970
-                    heights.append(h)
-                    inner = _re.search(r'<svg[^>]*>([\s\S]*)</svg>', svg)
-                    inner_contents.append(inner.group(1) if inner else "")
-                total_h = sum(heights)
-                combined = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {page_width} {total_h:.0f}">'
-                y = 0.0
-                for content, h in zip(inner_contents, heights):
-                    combined += f'<g transform="translate(0,{y:.0f})">{content}</g>'
-                    y += h
-                combined += "</svg>"
+                parts = []
+                total_h = 0.0
+                W = 2100
+                for svg in page_svgs:
+                    m = _re.search(r'height="([^"]+)"', svg)
+                    h = float(m.group(1)) if m else 3000
+                    # 루트 <svg> 태그를 <g translate>로 교체
+                    inner = _re.sub(r'<\?xml[^>]*\?>\s*', '', svg)
+                    inner = _re.sub(r'<svg[^>]*>', f'<g transform="translate(0,{total_h:.0f})">', inner, count=1)
+                    inner = _re.sub(r'</svg>\s*$', '</g>', inner)
+                    parts.append(inner)
+                    total_h += h
+                combined = (
+                    f'<svg xmlns="http://www.w3.org/2000/svg" '
+                    f'width="{W}" height="{total_h:.0f}" '
+                    f'viewBox="0 0 {W} {total_h:.0f}">'
+                    + "".join(parts) + "</svg>"
+                )
                 svg_bytes = combined.encode("utf-8")
 
-            print(f"[score] SVG generated: {len(svg_bytes)} bytes")
+            print(f"[score] SVG: {len(svg_bytes)} bytes, {page_count} pages")
         except Exception as e:
             print(f"[score] verovio failed: {e}")
 
